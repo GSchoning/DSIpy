@@ -134,6 +134,8 @@ dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 ## 📚 Theoretical Background
 
 ### The BEL Philosophy
+
+
 **Bayesian Evidential Learning (BEL)** represents a paradigm shift from traditional model-based inversion.
 * **Traditional Inversion ($d \to m \to h$):** You iteratively adjust model parameters ($m$) to match observed data ($d$), then run the model forward to get predictions ($h$). This is often computationally expensive and ill-posed.
 * **BEL / DSI ($d \to h$):** We acknowledge that the physical model is just a mechanism to generate a statistical relationship between data and predictions. DSI learns this relationship directly from a **prior ensemble** of model realizations.
@@ -152,13 +154,15 @@ $$
 $$
 
 Where:
-* $M_d, M_h$ are basis matrices derived from the prior ensemble covariance.
-* $x$ is a vector of latent parameters with a prior distribution $x \sim N(0, I)$.
+* **$d, h$**: Vectors representing the observations (data) and the predictions (quantities of interest).
+* **$\mu_d, \mu_h$**: The prior means (average) of the observations and predictions, calculated from the ensemble.
+* **$M_d, M_h$**: The basis matrices (linear operators) derived from the covariance of the prior ensemble. These map the latent variables to the physical space.
+* **$x$**: A vector of latent variables in the reduced space. These are statistically defined to follow a standard normal prior: $x \sim N(0, I)$.
 
 ### The "Inversion" Step
 Since the surrogate relates observations $d$ directly to the latent variables $x$ via a linear operator ($M_d$), finding the posterior becomes a standard linear-Gaussian inversion problem.
 
-When we observe real field data ($d_{obs}$), we solve for the optimal latent vector $x_{post}$ that minimizes the mismatch. Because $x$ controls both $d$ and $h$, determining $x_{post}$ automatically determines the posterior prediction $h_{post}$.
+When we observe real field data ($d_{obs}$), we solve for the optimal latent vector $x_{post}$ that minimizes the mismatch between the surrogate output ($\mu_d + M_d x$) and the field data. Because $x$ controls both $d$ and $h$, determining $x_{post}$ automatically determines the posterior prediction $h_{post}$.
 
 ### Why use DSI?
 * **Speed:** Once the ensemble is generated, DSI inversion takes seconds, whereas traditional history matching might take weeks.
@@ -172,4 +176,4 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 ## Author
 
 **G. Schoning**
-*Office of Groundwater Impact Assessment/Flinders University
+*Office of Groundwater Impact Assessment / Flinders University*
