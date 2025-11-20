@@ -177,6 +177,8 @@ If you use DSIpy in your research, please consider citing the following foundati
     Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press.
 * **Data Space Inversion (DSI):**
     Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using data-space inversion. *Computational Geosciences*, 19(5), 931-951.
+* **Implementation & Covariance-based DSI:**
+    Delottier, H., et al. (2023). *[Title of the specific Delottier et al. implementation used]*.
 * **ES-MDA (Algorithm used for IES):**
     Emerick, A. A., & Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. *Computers & Geosciences*, 55, 3-15.
 * **Randomized Maximum Likelihood (RML):**
