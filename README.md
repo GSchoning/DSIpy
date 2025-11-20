@@ -133,13 +133,37 @@ dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 
 ## 📚 Theoretical Background
 
-**DSI** operates on the principle that if a statistical relationship (Covariance) can be established between data and prediction in a latent space (via SVD), we can condition predictions on observed data without resolving the physical forward model.
+### The BEL Philosophy
+**Bayesian Evidential Learning (BEL)** represents a paradigm shift from traditional model-based inversion.
+* **Traditional Inversion ($d \to m \to h$):** You iteratively adjust model parameters ($m$) to match observed data ($d$), then run the model forward to get predictions ($h$). This is often computationally expensive and ill-posed.
+* **BEL / DSI ($d \to h$):** We acknowledge that the physical model is just a mechanism to generate a statistical relationship between data and predictions. DSI learns this relationship directly from a **prior ensemble** of model realizations.
 
-The core surrogate equation is:
-$$d_{obs} \approx \mu_{obs} + M_{obs} x$$
-$$h_{pred} \approx \mu_{pred} + M_{pred} x$$
+### How DSI Works
+Data Space Inversion (DSI) constructs a statistical surrogate model based on the **joint covariance** of the observations and predictions.
 
-Where $x$ is a latent variable vector $x \sim N(0, I)$. Inversion becomes the task of finding the optimal $x$ given $d_{obs}$.
+1.  **The Prior:** We generate $N$ realizations of the physical model. Each realization produces a vector of simulated observations ($d$) and a target prediction ($h$).
+2.  **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^*$ and $h^*$.
+3.  **The Joint Surrogate:** We concatenate $d^*$ and $h^*$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
+
+The resulting linear surrogate model is:
+
+$$
+\begin{bmatrix} d \\ h \end{bmatrix} \approx \begin{bmatrix} \mu_d \\ \mu_h \end{bmatrix} + \begin{bmatrix} M_d \\ M_h \end{bmatrix} x
+$$
+
+Where:
+* $M_d, M_h$ are basis matrices derived from the prior ensemble covariance.
+* $x$ is a vector of latent parameters with a prior distribution $x \sim N(0, I)$.
+
+### The "Inversion" Step
+Since the surrogate relates observations $d$ directly to the latent variables $x$ via a linear operator ($M_d$), finding the posterior becomes a standard linear-Gaussian inversion problem.
+
+When we observe real field data ($d_{obs}$), we solve for the optimal latent vector $x_{post}$ that minimizes the mismatch. Because $x$ controls both $d$ and $h$, determining $x_{post}$ automatically determines the posterior prediction $h_{post}$.
+
+### Why use DSI?
+* **Speed:** Once the ensemble is generated, DSI inversion takes seconds, whereas traditional history matching might take weeks.
+* **Uncertainty:** DSI naturally preserves the geologic variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution (P10, P50, P90).
+* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (IES)**, DSI can handle mild non-linearities in the data-prediction relationship.
 
 ## License
 
@@ -148,4 +172,4 @@ Where $x$ is a latent variable vector $x \sim N(0, I)$. Inversion becomes the ta
 ## Author
 
 **G. Schoning**
-*Hydrogeology & Groundwater Modeling*
+*Office of Groundwater IMpact Assessment/Flinders University
