@@ -286,8 +286,6 @@ class DSISurrogate:
     def _solve_ies(self, h_target_final, obs_noise_var_processed, n_posterior_samples, n_ies_iterations):
         """
         Solves the Iterative Ensemble Smoother using Multiple Data Assimilation (ES-MDA).
-        Reference: Emerick & Reynolds (2013).
-        We inflate the noise variance by alpha = n_iterations to avoid ensemble collapse.
         """
         print(f"\n--- Performing ES-MDA with {n_posterior_samples} members ---")
         
@@ -298,7 +296,6 @@ class DSISurrogate:
         X_k = np.random.normal(0.0, 1.0, size=(n_components_svd, n_posterior_samples))
         
         # --- MDA WEIGHTING FACTOR (Alpha) ---
-        # Inflate noise variance by the number of iterations to prevent ensemble collapse.
         alpha = n_ies_iterations 
         
         obs_noise_std_final = np.sqrt(np.mean(obs_noise_var_processed))
@@ -308,12 +305,36 @@ class DSISurrogate:
 
         H_true = np.tile(h_target_final.reshape(-1, 1), (1, n_posterior_samples))
 
+        # Initialize tracking for convergence
+        prev_phi_mean = None
+        
+        print(f"{'Iter':<5} {'Mean Phi':<15} {'Std Phi':<15} {'% Reduction':<15}")
+        print("-" * 55)
+
         for i_iter in range(n_ies_iterations):
-            print(f"  ES-MDA Iteration {i_iter + 1}/{n_ies_iterations}...")
             
             # 1. Forward Run (on surrogate)
             O_k = (M_obs @ X_k) + mean_o.reshape(-1, 1)
             
+            # --- NEW: Calculate Objective Function (Phi) Statistics ---
+            # Calculate raw residuals (non-inflated noise) to track real convergence
+            residuals = (H_true - O_k) / obs_noise_std_final
+            # Sum of squared residuals per member (Objective Function)
+            phi_ensemble = np.sum(residuals**2, axis=0)
+            
+            phi_mean = np.mean(phi_ensemble)
+            phi_std = np.std(phi_ensemble)
+            
+            if prev_phi_mean is None:
+                red_str = "  -"
+            else:
+                reduction = (prev_phi_mean - phi_mean) / prev_phi_mean * 100
+                red_str = f"{reduction:.2f}%"
+
+            print(f"{i_iter + 1:<5} {phi_mean:<15.4f} {phi_std:<15.4f} {red_str:<15}")
+            prev_phi_mean = phi_mean
+            # ----------------------------------------------------------
+
             # 2. Perturb observations with INFLATED noise
             # Resample noise every iteration with sqrt(alpha) scaling
             Noise_obs = np.random.normal(0.0, obs_noise_std_final * np.sqrt(alpha), 
