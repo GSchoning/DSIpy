@@ -169,6 +169,19 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 * **Uncertainty:** DSI naturally preserves the geologic variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution (P10, P50, P90).
 * **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)**, DSI can handle mild non-linearities in the data-prediction relationship.
 
+## 🔬 References
+
+If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
+
+* **Bayesian Evidential Learning (BEL):**
+    Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press.
+* **Data Space Inversion (DSI):**
+    Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using data-space inversion. *Computational Geosciences*, 19(5), 931-951.
+* **ES-MDA (Algorithm used for IES):**
+    Emerick, A. A., & Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. *Computers & Geosciences*, 55, 3-15.
+* **Randomized Maximum Likelihood (RML):**
+    Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11.
+
 ## License
 
 [MIT License](LICENSE)
