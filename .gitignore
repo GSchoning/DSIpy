@@ -1,0 +1,61 @@
+# --- Python General ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Distribution / Packaging ---
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Virtual Environments ---
+# Common names for virtual envs
+env/
+venv/
+.env
+.venv
+venv.bak/
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints/
+# Uncomment the line below if you don't want to commit notebooks at all
+# *.ipynb
+
+# --- DSIpy Specific: Large Data & Models ---
+# Critical: Prevent large array files from bloating the repo
+*.npy
+*.npz
+*.csv
+*.xlsx
+*.xls
+*.json
+
+# Saved Surrogate Models (Binary files)
+*.pkl
+*.pickle
+*.joblib
+
+# --- Dask & Parallel Computing ---
+dask-worker-space/
+.dask/
+
+# --- IDE / Editor Settings ---
+.idea/
+.vscode/
+*.swp
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
