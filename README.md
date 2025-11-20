@@ -33,9 +33,9 @@ git clone [https://github.com/yourusername/dsipy.git](https://github.com/youruse
 cd dsipy
 ```
 
-Then, in your Python script:
+Then, in your Python script (ensure the file is named `DSIpy.py`):
 ```python
-from dsi_surrogate import DSISurrogate
+from DSIpy import DSISurrogate
 ```
 
 ## ⚡ Quick Start
@@ -45,7 +45,7 @@ This example demonstrates how to train the surrogate on a prior ensemble and pre
 
 ```python
 import numpy as np
-from dsi_surrogate import DSISurrogate
+from DSIpy import DSISurrogate
 
 # 1. Load your data (Example shapes)
 # obs_prior: (500 realizations, 1000 time steps)
@@ -172,4 +172,4 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 ## Author
 
 **G. Schoning**
-*Office of Groundwater IMpact Assessment/Flinders University
+*Office of Groundwater Impact Assessment/Flinders UNiversity
