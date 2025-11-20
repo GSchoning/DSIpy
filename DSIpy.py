@@ -21,7 +21,7 @@ class DSISurrogate:
     Implements Data Space Inversion (DSI) using a covariance-based surrogate.
 
     Builds a surrogate linking observations and predictions based on a prior
-    ensemble and allows conditioning using MAP, RML, ES, or IES.
+    ensemble and allows conditioning using MAP, RML, ES, or IES (ES-MDA).
 
     Args:
         obs_pca_variance (float): Variance threshold for input PCA (e.g., 0.95).
@@ -272,8 +272,6 @@ class DSISurrogate:
         C_xo = (X_prime @ O_prime.T) / (n_posterior_samples - 1)
 
         # Optimization: Use solve instead of inv
-        # Kalman gain K = C_xo * (C_oo + C_noise)^-1
-        # Transpose to solve Ax=B: (C_oo + C_noise) * K.T = C_xo.T
         matrix_to_invert = C_oo + C_noise
         try:
             K_T = solve(matrix_to_invert, C_xo.T, assume_a='pos')
@@ -286,38 +284,59 @@ class DSISurrogate:
         return X_posterior.T
 
     def _solve_ies(self, h_target_final, obs_noise_var_processed, n_posterior_samples, n_ies_iterations):
-        print(f"\n--- Performing Iterative Ensemble Smoother (IES) with {n_posterior_samples} members ---")
+        """
+        Solves the Iterative Ensemble Smoother using Multiple Data Assimilation (ES-MDA).
+        Reference: Emerick & Reynolds (2013).
+        We inflate the noise variance by alpha = n_iterations to avoid ensemble collapse.
+        """
+        print(f"\n--- Performing ES-MDA with {n_posterior_samples} members ---")
+        
         M_obs, mean_o = self.surrogate_components_['M_obs'], self.surrogate_components_['mean_o']
         n_components_svd = self.surrogate_components_['n_components']
         n_pcs_obs = M_obs.shape[0]
 
         X_k = np.random.normal(0.0, 1.0, size=(n_components_svd, n_posterior_samples))
         
+        # --- MDA WEIGHTING FACTOR (Alpha) ---
+        # Inflate noise variance by the number of iterations to prevent ensemble collapse.
+        alpha = n_ies_iterations 
+        
         obs_noise_std_final = np.sqrt(np.mean(obs_noise_var_processed))
+        
+        # Inflated Noise Covariance Matrix for the update step
+        C_noise_inflated = np.identity(n_pcs_obs) * (obs_noise_std_final**2) * alpha
+
         H_true = np.tile(h_target_final.reshape(-1, 1), (1, n_posterior_samples))
-        Noise_obs = np.random.normal(0.0, obs_noise_std_final, size=(n_pcs_obs, n_posterior_samples))
-        H_noisy = H_true + Noise_obs
-        C_noise = np.identity(n_pcs_obs) * (obs_noise_std_final**2)
 
         for i_iter in range(n_ies_iterations):
-            print(f"  IES Iteration {i_iter + 1}/{n_ies_iterations}...")
+            print(f"  ES-MDA Iteration {i_iter + 1}/{n_ies_iterations}...")
+            
+            # 1. Forward Run (on surrogate)
             O_k = (M_obs @ X_k) + mean_o.reshape(-1, 1)
             
+            # 2. Perturb observations with INFLATED noise
+            # Resample noise every iteration with sqrt(alpha) scaling
+            Noise_obs = np.random.normal(0.0, obs_noise_std_final * np.sqrt(alpha), 
+                                         size=(n_pcs_obs, n_posterior_samples))
+            H_noisy = H_true + Noise_obs
+
+            # 3. Covariances
             X_k_prime = X_k - X_k.mean(axis=1, keepdims=True)
             O_k_prime = O_k - O_k.mean(axis=1, keepdims=True)
             
             C_oo_k = (O_k_prime @ O_k_prime.T) / (n_posterior_samples - 1)
             C_xo_k = (X_k_prime @ O_k_prime.T) / (n_posterior_samples - 1)
             
-            # Optimization: Use solve instead of inv
-            matrix_to_invert = C_oo_k + C_noise
+            # 4. Update with Inflated Noise Matrix
+            matrix_to_invert = C_oo_k + C_noise_inflated
+            
             try:
                 K_T = solve(matrix_to_invert, C_xo_k.T, assume_a='pos')
                 kalman_gain_k = K_T.T
             except np.linalg.LinAlgError:
                 kalman_gain_k = C_xo_k @ np.linalg.pinv(matrix_to_invert)
 
-            # IES Update step (using standard damping = 1.0)
+            # 5. State Update
             X_k = X_k + kalman_gain_k @ (H_noisy - O_k)
         
         return X_k.T
@@ -422,8 +441,7 @@ class DSISurrogate:
                     client = get_client()
                     user_managed_client = True
                 except ValueError:
-                    cluster = LocalCluster()
-                    client = Client(cluster)
+                    client = Client(LocalCluster())
                     user_managed_client = False
                 
                 print(f"Dask dashboard at: {client.dashboard_link}")
@@ -436,7 +454,7 @@ class DSISurrogate:
                 
                 if not user_managed_client:
                     client.close()
-                    cluster.close()
+                    
                 x_posterior = np.array(x_posterior_list)
                 
             except Exception as e:
