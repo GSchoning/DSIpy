@@ -11,7 +11,7 @@ It provides a framework for quantifying uncertainty in complex physical systems 
     * **MAP:** Maximum A Posteriori estimation (Analytical & Conjugate Gradient solvers).
     * **RML:** Randomized Maximum Likelihood for robust uncertainty quantification.
     * **ES:** Ensemble Smoother for rapid, linear-Gaussian updates.
-    * **IES:** Iterative Ensemble Smoother for handling mild non-linearities.
+    * **IES / ES-MDA:** Iterative Ensemble Smoother with Multiple Data Assimilation for robustly handling non-linearities.
 * **Parallel Computing:** Integrated **Dask** support for parallelizing RML inversions across cores.
 * **Data Transformations:** Built-in handling for Log10 (orders of magnitude) and Logit (bounded variables like saturation) transforms.
 * **Model Persistence:** Save and load trained surrogate models to/from disk (Pickle format).
@@ -134,11 +134,11 @@ dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 ## 📚 Theoretical Background
 
 ### The BEL Philosophy
-
-
 **Bayesian Evidential Learning (BEL)** represents a paradigm shift from traditional model-based inversion.
 * **Traditional Inversion ($d \to m \to h$):** You iteratively adjust model parameters ($m$) to match observed data ($d$), then run the model forward to get predictions ($h$). This is often computationally expensive and ill-posed.
 * **BEL / DSI ($d \to h$):** We acknowledge that the physical model is just a mechanism to generate a statistical relationship between data and predictions. DSI learns this relationship directly from a **prior ensemble** of model realizations.
+
+
 
 ### How DSI Works
 Data Space Inversion (DSI) constructs a statistical surrogate model based on the **joint covariance** of the observations and predictions.
@@ -167,7 +167,7 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 ### Why use DSI?
 * **Speed:** Once the ensemble is generated, DSI inversion takes seconds, whereas traditional history matching might take weeks.
 * **Uncertainty:** DSI naturally preserves the geologic variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution (P10, P50, P90).
-* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (IES)**, DSI can handle mild non-linearities in the data-prediction relationship.
+* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)**, DSI can handle mild non-linearities in the data-prediction relationship.
 
 ## License
 
