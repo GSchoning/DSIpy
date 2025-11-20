@@ -172,4 +172,4 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 ## Author
 
 **G. Schoning**
-*Office of Groundwater Impact Assessment/Flinders UNiversity
+*Office of Groundwater Impact Assessment/Flinders University
