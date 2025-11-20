@@ -173,8 +173,8 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
 
-* **DSI Tool & Methodology:**
-    Delottier, H., Schilling, O. S., & Brunner, P. (2023). DSI v1.0: a data-space inversion tool for computationally efficient uncertainty quantification and calibration of groundwater models. *Geoscientific Model Development*, 16(14), 4213–4228. https://doi.org/10.5194/gmd-16-4213-2023
+* **DSI Implementation & Methodology:**
+    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. https://doi.org/10.1016/j.jhydrol.2021.127296
 * **Data Space Inversion (Foundational Theory):**
     Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using data-space inversion. *Computational Geosciences*, 19(5), 931-951.
 * **Bayesian Evidential Learning (BEL):**
