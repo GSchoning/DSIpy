@@ -288,20 +288,22 @@ class DSISurrogate:
         plt.show()
         print("Diagnostics complete.")
 
-    def apply_bias_correction(self, posterior_ensemble, obs_prior, pred_prior, method='polynomial', poly_order=2):
+    def apply_bias_correction(self, posterior_ensemble, obs_prior, pred_prior, method='auto', poly_order=2, auto_threshold=0.6):
         """
         Corrects the posterior predictions by learning the non-linear mapping 
         between Surrogate and Physics observed in the Prior.
         
         CRITICAL: This function takes ORIGINAL SPACE inputs, transforms them internally 
         to the feature space (Log/Logit), performs correction, and returns ORIGINAL SPACE outputs.
-        This ensures polynomial corrections respect physical bounds (e.g. Saturation [0,1]).
 
         Methods:
+        - 'auto': Automatically chooses method based on correlation (r).
+                  If r > auto_threshold: Uses 'quantile' (safe for non-linearities).
+                  If r <= auto_threshold: Uses 'error_inflation' (safe for weak surrogates).
         - 'polynomial': Fits a polynomial curve (True = f(Surrogate))
         - 'linear': Fits a linear regression (True = a*Surrogate + b)
-        - 'quantile': Quantile Mapping (matches CDF of posterior to Prior Truth). 
-                      Uses Clamping (constant extrapolation) to prevent explosion.
+        - 'quantile': Quantile Mapping (matches CDF of posterior to Prior Truth)
+                      SAFE VERSION: Clamps values to prior range to avoid extrapolation explosion.
         - 'error_inflation': Adds random noise based on surrogate error std dev
         """
         if not self.is_fitted_:
@@ -310,8 +312,6 @@ class DSISurrogate:
         print(f"--- Applying Bias Correction ({method}) ---")
         
         # 1. Re-run Surrogate on Prior to establish baseline (in Transformed Space)
-        
-        # Transform Observations
         if self.log_transform_obs:
             h_obs_proc = np.log10(np.maximum(obs_prior, self.epsilon))
         else:
@@ -347,14 +347,12 @@ class DSISurrogate:
         prior_surr_trans = self.pred_scaler_.inverse_transform(pred_s_scaled)
 
         # 2. Transform Inputs to Feature Space for fitting
-        # We transform the user's original data into the same space as prior_surr_trans
         
         # Transform True Prior Predictions
         if self.pred_transform == 'log':
             y_true_trans = np.log10(np.maximum(pred_prior, self.epsilon))
         elif self.pred_transform == 'logit':
             a, b = self.pred_bounds
-            # Clip to avoid infs during transform
             y_scaled = (pred_prior - a) / (b - a)
             y_true_trans = logit(np.clip(y_scaled, self.epsilon, 1 - self.epsilon))
         else:
@@ -377,12 +375,28 @@ class DSISurrogate:
         if y_post_trans.shape[1] != n_vars:
             raise ValueError("Posterior ensemble columns do not match prior predictions columns.")
 
+        stats = {'auto_quantile': 0, 'auto_error': 0}
+
         for i in range(n_vars):
             y_t = y_true_trans[:, i]       # Truth (Transformed)
             y_s = prior_surr_trans[:, i]   # Surrogate (Transformed)
             y_p = y_post_trans[:, i]       # Posterior (Transformed)
             
-            if method == 'linear':
+            current_method = method
+            
+            # --- Auto-Pilot Logic ---
+            if method == 'auto':
+                # Check Correlation
+                corr = np.corrcoef(y_t, y_s)[0, 1]
+                if corr >= auto_threshold:
+                    current_method = 'quantile'
+                    stats['auto_quantile'] += 1
+                else:
+                    current_method = 'error_inflation'
+                    stats['auto_error'] += 1
+            # ------------------------
+
+            if current_method == 'linear':
                 try:
                     # Linear Regression (Degree 1)
                     p = Polynomial.fit(y_s, y_t, deg=1)
@@ -390,7 +404,7 @@ class DSISurrogate:
                 except:
                     corrected_post_trans[:, i] = y_p
 
-            elif method == 'polynomial':
+            elif current_method == 'polynomial':
                 try:
                     # Polynomial Regression (Degree N)
                     p = Polynomial.fit(y_s, y_t, deg=poly_order)
@@ -398,7 +412,7 @@ class DSISurrogate:
                 except:
                     corrected_post_trans[:, i] = y_p
 
-            elif method == 'quantile':
+            elif current_method == 'quantile':
                 # Quantile Mapping (CDF Matching)
                 sort_idx_surr = np.argsort(y_s)
                 y_s_sorted = y_s[sort_idx_surr]
@@ -411,7 +425,7 @@ class DSISurrogate:
                                    fill_value=(y_t_sorted[0], y_t_sorted[-1]))
                 corrected_post_trans[:, i] = f_quant(y_p)
 
-            elif method == 'error_inflation':
+            elif current_method == 'error_inflation':
                 error = y_t - y_s
                 std_error = np.std(error)
                 noise = np.random.normal(0, std_error, size=y_p.shape)
@@ -427,6 +441,9 @@ class DSISurrogate:
         else:
             corrected_posterior = corrected_post_trans
 
+        if method == 'auto':
+            print(f"Auto-Correction Summary: Quantile ({stats['auto_quantile']}) | Error Inf ({stats['auto_error']})")
+        
         print("Bias correction complete.")
         return corrected_posterior
 
