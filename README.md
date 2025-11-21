@@ -1,6 +1,6 @@
 # DSIpy: Data Space Inversion & Bayesian Evidential Learning
 
-**DSIpy** is a lightweight, high-performance Python module for **Data Space Inversion (DSI)** and **Bayesian Evidential Learning (BEL)**. 
+**DSIpy** is a lightweight, high-performance Python module for **Data Space Inversion (DSI)** and **Bayesian Evidential Learning (BEL)**.
 
 It provides a framework for quantifying uncertainty in complex physical systems (hydrogeology, geophysics, reservoir engineering) by learning a direct statistical relationship between observations and predictions, bypassing the need for high-dimensional parameter inversion.
 
@@ -12,7 +12,7 @@ It provides a framework for quantifying uncertainty in complex physical systems 
     * **RML:** Randomized Maximum Likelihood for robust uncertainty quantification.
     * **ES:** Ensemble Smoother for rapid, linear-Gaussian updates.
     * **IES / ES-MDA:** Iterative Ensemble Smoother with Multiple Data Assimilation for robustly handling non-linearities.
-* **Bias Correction:** Post-processing tools to diagnose surrogate error and correct posterior predictions using polynomial regression or error inflation.
+* **Bias Correction:** Post-processing tools to diagnose surrogate error and correct posterior predictions using **quantile mapping**, **polynomial/linear regression**, or **error inflation**.
 * **Parallel Computing:** Integrated **Dask** support for parallelizing RML inversions across cores.
 * **Data Transformations:** Built-in handling for Log10 (orders of magnitude) and Logit (bounded variables like saturation) transforms.
 * **Model Persistence:** Save and load trained surrogate models to/from disk (Pickle format).
@@ -103,8 +103,6 @@ mean, std, _ = dsi_sat.predict(
 
 DSI relies on a linear surrogate ($d = \mu + Mx$). If the physical relationship between observations and predictions is highly non-linear, the surrogate may introduce a systematic bias. DSIpy includes tools to **diagnose** this bias (by running the surrogate on the prior) and **correct** the posterior predictions.
 
-
-
 **Step 1: Diagnose Bias**
 Generate a scatter plot of *True Physics* vs. *Surrogate Prediction* for your prior ensemble.
 
@@ -118,7 +116,7 @@ dsi.diagnose_surrogate_bias(
 ```
 
 **Step 2: Apply Correction**
-If a systematic curve is observed (e.g., a "banana" shape), apply a polynomial correction to the posterior results.
+Apply a statistical correction to the posterior results based on the relationship learned from the Prior.
 
 ```python
 # Get the "biased" posterior from the inversion
@@ -129,8 +127,7 @@ posterior_corrected = dsi.apply_bias_correction(
     posterior_ensemble=posterior_biased,
     obs_prior=obs_prior,
     pred_prior=pred_prior,
-    method='polynomial', # Fits a curve to map Surrogate -> Physics
-    poly_order=2
+    method='quantile' # Options: 'quantile', 'polynomial', 'linear', 'error_inflation'
 )
 ```
 
