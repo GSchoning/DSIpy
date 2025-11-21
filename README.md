@@ -12,6 +12,7 @@ It provides a framework for quantifying uncertainty in complex physical systems 
     * **RML:** Randomized Maximum Likelihood for robust uncertainty quantification.
     * **ES:** Ensemble Smoother for rapid, linear-Gaussian updates.
     * **IES / ES-MDA:** Iterative Ensemble Smoother with Multiple Data Assimilation for robustly handling non-linearities.
+* **Bias Correction:** Post-processing tools to diagnose surrogate error and correct posterior predictions using polynomial regression or error inflation.
 * **Parallel Computing:** Integrated **Dask** support for parallelizing RML inversions across cores.
 * **Data Transformations:** Built-in handling for Log10 (orders of magnitude) and Logit (bounded variables like saturation) transforms.
 * **Model Persistence:** Save and load trained surrogate models to/from disk (Pickle format).
@@ -98,6 +99,41 @@ mean, std, _ = dsi_sat.predict(
 )
 ```
 
+### 3. Dealing with Non-Linearity (Bias Correction)
+
+DSI relies on a linear surrogate ($d = \mu + Mx$). If the physical relationship between observations and predictions is highly non-linear, the surrogate may introduce a systematic bias. DSIpy includes tools to **diagnose** this bias (by running the surrogate on the prior) and **correct** the posterior predictions.
+
+
+
+**Step 1: Diagnose Bias**
+Generate a scatter plot of *True Physics* vs. *Surrogate Prediction* for your prior ensemble.
+
+```python
+# Check how well the surrogate approximates variable index 0 and 1
+dsi.diagnose_surrogate_bias(
+    obs_prior=obs_prior, 
+    pred_prior=pred_prior, 
+    indices_to_plot=[0, 1]
+)
+```
+
+**Step 2: Apply Correction**
+If a systematic curve is observed (e.g., a "banana" shape), apply a polynomial correction to the posterior results.
+
+```python
+# Get the "biased" posterior from the inversion
+_, _, _, posterior_biased = dsi.predict(..., return_ensemble=True)
+
+# Correct it based on the relationship learned from the Prior
+posterior_corrected = dsi.apply_bias_correction(
+    posterior_ensemble=posterior_biased,
+    obs_prior=obs_prior,
+    pred_prior=pred_prior,
+    method='polynomial', # Fits a curve to map Surrogate -> Physics
+    poly_order=2
+)
+```
+
 ## 📖 Documentation
 
 ### `DSISurrogate` Class Arguments
@@ -138,10 +174,15 @@ dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 * **Traditional Inversion ($d \to m \to h$):** You iteratively adjust physical parameters ($m$) to match observed data ($d$), then run the model forward to get predictions ($h$). This is often computationally expensive and ill-posed.
 * **BEL / DSI ($d \to h$):** We acknowledge that the physical model is just a mechanism to generate a statistical relationship between data and predictions. DSI learns this relationship directly from a **prior ensemble** of model realizations.
 
-### 1. The Surrogate Model (The "Physics")
-DSI constructs a fast linear surrogate based on the **joint covariance** of the observations ($d$) and predictions ($h$). Using Singular Value Decomposition (SVD), we find a low-dimensional **latent space** ($x$) that drives the variability in both.
+### How DSI Works
+Data Space Inversion (DSI) constructs a statistical surrogate model based on the **joint covariance** of the observations and predictions.
 
-**The DSI Equation:**
+1.  **The Prior:** We generate $N$ realizations of the physical model. Each realization produces a vector of simulated observations ($d$) and a target prediction ($h$).
+2.  **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^*$ and $h^*$.
+3.  **The Joint Surrogate:** We concatenate $d^*$ and $h^*$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
+
+The resulting linear surrogate model is:
+
 $$
 \begin{bmatrix} d \\ h \end{bmatrix} \approx \begin{bmatrix} \mu_d \\ \mu_h \end{bmatrix} + \begin{bmatrix} M_d \\ M_h \end{bmatrix} x
 $$
@@ -152,16 +193,15 @@ Where:
 * **$M_d, M_h$**: The basis matrices (linear operators) derived from the covariance of the prior ensemble. These map the latent variables to the physical space.
 * **$x$**: A vector of latent variables in the reduced space. These are statistically defined to follow a standard normal prior: $x \sim N(0, I)$.
 
-### 2. The Inversion Algorithm (The "Solver")
-To find the posterior solution, we must determine the vector $x$ that best matches the observed data $d_{obs}$. DSIpy uses the **Iterative Ensemble Smoother with Multiple Data Assimilation (ES-MDA)** as derived by *Emerick & Reynolds (2013)*.
+### The "Inversion" Step
+Since the surrogate relates observations $d$ directly to the latent variables $x$ via a linear operator ($M_d$), finding the posterior becomes a standard linear-Gaussian inversion problem.
 
-**The Update Equation:**
-$$x_{new} = x_{old} + K (d_{obs}^* - (\mu_d + M_d x_{old}))$$
+When we observe real field data ($d_{obs}$), we solve for the optimal latent vector $x_{post}$ that minimizes the mismatch between the surrogate output ($\mu_d + M_d x$) and the field data. Because $x$ controls both $d$ and $h$, determining $x_{post}$ automatically determines the posterior prediction $h_{post}$.
 
-Where $K$ is the Kalman Gain, calculated using the covariance of the ensemble and an **inflated** noise variance to robustly handle non-linearities:
-$$K = C_{xd} (C_{dd} + \alpha C_{noise})^{-1}$$
-
-By applying this update iteratively, DSIpy finds an ensemble of posterior latent vectors $x_{post}$, which are then projected back to the prediction space ($h$) using the surrogate equation.
+### Why use DSI?
+* **Speed:** Once the ensemble is generated, DSI inversion takes seconds, whereas traditional history matching might take weeks.
+* **Uncertainty:** DSI naturally preserves the geologic variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution (P10, P50, P90).
+* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)**, DSI can handle mild non-linearities in the data-prediction relationship.
 
 ## 🔬 References
 
