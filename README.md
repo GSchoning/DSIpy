@@ -12,7 +12,7 @@ It provides a framework for quantifying uncertainty in complex physical systems 
     * **RML:** Randomized Maximum Likelihood for robust uncertainty quantification.
     * **ES:** Ensemble Smoother for rapid, linear-Gaussian updates.
     * **IES / ES-MDA:** Iterative Ensemble Smoother with Multiple Data Assimilation for robustly handling non-linearities.
-* **Bias Correction:** Post-processing tools to diagnose surrogate error and correct posterior predictions using **quantile mapping**, **polynomial/linear regression**, or **error inflation**.
+* **Bias Correction:** Post-processing tools to diagnose surrogate error and correct posterior predictions using **auto-pilot**, **quantile mapping**, **polynomial/linear regression**, or **error inflation**.
 * **Parallel Computing:** Integrated **Dask** support for parallelizing RML inversions across cores.
 * **Data Transformations:** Built-in handling for Log10 (orders of magnitude) and Logit (bounded variables like saturation) transforms.
 * **Model Persistence:** Save and load trained surrogate models to/from disk (Pickle format).
@@ -30,7 +30,7 @@ pip install numpy pandas scipy scikit-learn dask[distributed] matplotlib
 Since DSIpy is a standalone module, you can simply clone this repository and import the class:
 
 ```bash
-git clone [https://github.com/yourusername/dsipy.git](https://github.com/yourusername/dsipy.git)
+git clone https://github.com/yourusername/dsipy.git
 cd dsipy
 ```
 
@@ -127,9 +127,10 @@ posterior_corrected = dsi.apply_bias_correction(
     posterior_ensemble=posterior_biased,
     obs_prior=obs_prior,
     pred_prior=pred_prior,
-    method='quantile' # Options: 'quantile', 'polynomial', 'linear', 'error_inflation'
+    method='auto' # Options: 'auto', 'quantile', 'polynomial', 'linear', 'error_inflation'
 )
 ```
+*Note: `method='auto'` checks the correlation for each variable. If correlation is high (>0.6), it applies **Quantile Mapping** to fix non-linearity/bounds. If correlation is low, it applies **Error Inflation** to safely widen uncertainty.*
 
 ## 📖 Documentation
 
@@ -168,7 +169,7 @@ dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 
 ### The BEL Philosophy
 **Bayesian Evidential Learning (BEL)** represents a paradigm shift from traditional model-based inversion.
-* **Traditional Inversion ($d \to m \to h$):** You iteratively adjust physical parameters ($m$) to match observed data ($d$), then run the model forward to get predictions ($h$). This is often computationally expensive and ill-posed.
+* **Traditional Inversion ($d \to m \to h$):** You iteratively adjust model parameters ($m$) to match observed data ($d$), then run the model forward to get predictions ($h$). This is often computationally expensive and ill-posed.
 * **BEL / DSI ($d \to h$):** We acknowledge that the physical model is just a mechanism to generate a statistical relationship between data and predictions. DSI learns this relationship directly from a **prior ensemble** of model realizations.
 
 ### How DSI Works
@@ -205,7 +206,7 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
 
 * **DSI Implementation & Methodology:**
-    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. https://doi.org/10.1016/j.jhydrol.2021.127296
+    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. [https://doi.org/10.1016/j.jhydrol.2021.127296](https://doi.org/10.1016/j.jhydrol.2021.127296)
 * **Data Space Inversion (Foundational Theory):**
     Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using data-space inversion. *Computational Geosciences*, 19(5), 931-951.
 * **Bayesian Evidential Learning (BEL):**
