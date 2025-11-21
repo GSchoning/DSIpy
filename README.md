@@ -135,20 +135,13 @@ dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 
 ### The BEL Philosophy
 **Bayesian Evidential Learning (BEL)** represents a paradigm shift from traditional model-based inversion.
-* **Traditional Inversion ($d \to m \to h$):** You iteratively adjust model parameters ($m$) to match observed data ($d$), then run the model forward to get predictions ($h$). This is often computationally expensive and ill-posed.
+* **Traditional Inversion ($d \to m \to h$):** You iteratively adjust physical parameters ($m$) to match observed data ($d$), then run the model forward to get predictions ($h$). This is often computationally expensive and ill-posed.
 * **BEL / DSI ($d \to h$):** We acknowledge that the physical model is just a mechanism to generate a statistical relationship between data and predictions. DSI learns this relationship directly from a **prior ensemble** of model realizations.
 
+### 1. The Surrogate Model (The "Physics")
+DSI constructs a fast linear surrogate based on the **joint covariance** of the observations ($d$) and predictions ($h$). Using Singular Value Decomposition (SVD), we find a low-dimensional **latent space** ($x$) that drives the variability in both.
 
-
-### How DSI Works
-Data Space Inversion (DSI) constructs a statistical surrogate model based on the **joint covariance** of the observations and predictions.
-
-1.  **The Prior:** We generate $N$ realizations of the physical model. Each realization produces a vector of simulated observations ($d$) and a target prediction ($h$).
-2.  **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^*$ and $h^*$.
-3.  **The Joint Surrogate:** We concatenate $d^*$ and $h^*$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
-
-The resulting linear surrogate model is:
-
+**The DSI Equation:**
 $$
 \begin{bmatrix} d \\ h \end{bmatrix} \approx \begin{bmatrix} \mu_d \\ \mu_h \end{bmatrix} + \begin{bmatrix} M_d \\ M_h \end{bmatrix} x
 $$
@@ -159,15 +152,16 @@ Where:
 * **$M_d, M_h$**: The basis matrices (linear operators) derived from the covariance of the prior ensemble. These map the latent variables to the physical space.
 * **$x$**: A vector of latent variables in the reduced space. These are statistically defined to follow a standard normal prior: $x \sim N(0, I)$.
 
-### The "Inversion" Step
-Since the surrogate relates observations $d$ directly to the latent variables $x$ via a linear operator ($M_d$), finding the posterior becomes a standard linear-Gaussian inversion problem.
+### 2. The Inversion Algorithm (The "Solver")
+To find the posterior solution, we must determine the vector $x$ that best matches the observed data $d_{obs}$. DSIpy uses the **Iterative Ensemble Smoother with Multiple Data Assimilation (ES-MDA)** as derived by *Emerick & Reynolds (2013)*.
 
-When we observe real field data ($d_{obs}$), we solve for the optimal latent vector $x_{post}$ that minimizes the mismatch between the surrogate output ($\mu_d + M_d x$) and the field data. Because $x$ controls both $d$ and $h$, determining $x_{post}$ automatically determines the posterior prediction $h_{post}$.
+**The Update Equation:**
+$$x_{new} = x_{old} + K (d_{obs}^* - (\mu_d + M_d x_{old}))$$
 
-### Why use DSI?
-* **Speed:** Once the ensemble is generated, DSI inversion takes seconds, whereas traditional history matching might take weeks.
-* **Uncertainty:** DSI naturally preserves the geologic variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution (P10, P50, P90).
-* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)**, DSI can handle mild non-linearities in the data-prediction relationship.
+Where $K$ is the Kalman Gain, calculated using the covariance of the ensemble and an **inflated** noise variance to robustly handle non-linearities:
+$$K = C_{xd} (C_{dd} + \alpha C_{noise})^{-1}$$
+
+By applying this update iteratively, DSIpy finds an ensemble of posterior latent vectors $x_{post}$, which are then projected back to the prediction space ($h$) using the surrogate equation.
 
 ## 🔬 References
 
