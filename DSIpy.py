@@ -6,6 +6,7 @@ from sklearn.decomposition import PCA
 from scipy.linalg import solve
 from scipy.optimize import minimize, least_squares
 from scipy.special import logit, expit
+from scipy.interpolate import interp1d
 from numpy.polynomial import Polynomial
 import dask
 from dask import delayed
@@ -195,6 +196,7 @@ class DSISurrogate:
         """
         Runs the surrogate on the prior observations to compare surrogate predictions 
         against the true (physics-based) prior predictions.
+        Plots comparison in ORIGINAL SPACE.
         """
         if not self.is_fitted_:
             raise RuntimeError("Surrogate model must be fitted before running diagnostics.")
@@ -209,6 +211,7 @@ class DSISurrogate:
             obs_subset = obs_prior
             pred_subset_true = pred_prior
 
+        # Transform Observations (Original -> Transformed)
         if self.log_transform_obs:
             h_obs_proc = np.log10(np.maximum(obs_subset, self.epsilon))
         else:
@@ -221,6 +224,7 @@ class DSISurrogate:
         else:
             h_target = h_obs_scaled
 
+        # Invert
         M_obs = self.surrogate_components_['M_obs']
         M_pred = self.surrogate_components_['M_pred']
         mean_o = self.surrogate_components_['mean_o']
@@ -233,6 +237,7 @@ class DSISurrogate:
         X_est_T = solve(lhs, rhs.T, assume_a='pos') 
         X_est = X_est_T.T 
 
+        # Predict
         pred_s_pca = mean_s + (X_est @ M_pred.T)
         
         if self.pca_pred_:
@@ -242,6 +247,7 @@ class DSISurrogate:
             
         pred_s_trans = self.pred_scaler_.inverse_transform(pred_s_scaled)
         
+        # Transform Predictions Back (Transformed -> Original)
         if self.pred_transform == 'log':
             pred_subset_surrogate = 10**pred_s_trans
         elif self.pred_transform == 'logit':
@@ -273,7 +279,7 @@ class DSISurrogate:
             ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=1.5, alpha=0.7, label='1:1 Perfect')
             ax.scatter(y_true, y_surr, alpha=0.6, c='blue', edgecolor='k', s=20)
             ax.set_title(f'Variable Index {var_idx}\nCorr: {corr:.4f}')
-            ax.set_xlabel('True Value (Physics)')
+            ax.set_xlabel('True Value (Original Physics)')
             ax.set_ylabel('Predicted Value (Surrogate)')
             ax.grid(True, alpha=0.3)
             ax.legend()
@@ -286,13 +292,26 @@ class DSISurrogate:
         """
         Corrects the posterior predictions by learning the non-linear mapping 
         between Surrogate and Physics observed in the Prior.
+        
+        CRITICAL: This function takes ORIGINAL SPACE inputs, transforms them internally 
+        to the feature space (Log/Logit), performs correction, and returns ORIGINAL SPACE outputs.
+        This ensures polynomial corrections respect physical bounds (e.g. Saturation [0,1]).
+
+        Methods:
+        - 'polynomial': Fits a polynomial curve (True = f(Surrogate))
+        - 'linear': Fits a linear regression (True = a*Surrogate + b)
+        - 'quantile': Quantile Mapping (matches CDF of posterior to Prior Truth). 
+                      Uses Clamping (constant extrapolation) to prevent explosion.
+        - 'error_inflation': Adds random noise based on surrogate error std dev
         """
         if not self.is_fitted_:
             raise RuntimeError("Surrogate model must be fitted.")
 
         print(f"--- Applying Bias Correction ({method}) ---")
         
-        # Re-run Surrogate on Prior to establish baseline
+        # 1. Re-run Surrogate on Prior to establish baseline (in Transformed Space)
+        
+        # Transform Observations
         if self.log_transform_obs:
             h_obs_proc = np.log10(np.maximum(obs_prior, self.epsilon))
         else:
@@ -324,41 +343,90 @@ class DSISurrogate:
         else:
             pred_s_scaled = pred_s_pca
             
-        pred_s_trans = self.pred_scaler_.inverse_transform(pred_s_scaled)
-        
-        if self.pred_transform == 'log':
-            prior_surr = 10**pred_s_trans
-        elif self.pred_transform == 'logit':
-            y_01 = expit(pred_s_trans)
-            a, b = self.pred_bounds
-            prior_surr = y_01 * (b - a) + a
-        else:
-            prior_surr = pred_s_trans
+        # This is the surrogate output in the FEATURE SPACE (Log/Logit/Linear)
+        prior_surr_trans = self.pred_scaler_.inverse_transform(pred_s_scaled)
 
-        corrected_posterior = np.zeros_like(posterior_ensemble)
-        n_vars = pred_prior.shape[1]
+        # 2. Transform Inputs to Feature Space for fitting
+        # We transform the user's original data into the same space as prior_surr_trans
         
-        if posterior_ensemble.shape[1] != n_vars:
+        # Transform True Prior Predictions
+        if self.pred_transform == 'log':
+            y_true_trans = np.log10(np.maximum(pred_prior, self.epsilon))
+        elif self.pred_transform == 'logit':
+            a, b = self.pred_bounds
+            # Clip to avoid infs during transform
+            y_scaled = (pred_prior - a) / (b - a)
+            y_true_trans = logit(np.clip(y_scaled, self.epsilon, 1 - self.epsilon))
+        else:
+            y_true_trans = pred_prior
+
+        # Transform Posterior Ensemble (Input)
+        if self.pred_transform == 'log':
+            y_post_trans = np.log10(np.maximum(posterior_ensemble, self.epsilon))
+        elif self.pred_transform == 'logit':
+            a, b = self.pred_bounds
+            y_scaled = (posterior_ensemble - a) / (b - a)
+            y_post_trans = logit(np.clip(y_scaled, self.epsilon, 1 - self.epsilon))
+        else:
+            y_post_trans = posterior_ensemble
+
+        # 3. Apply Correction in Feature Space
+        corrected_post_trans = np.zeros_like(y_post_trans)
+        n_vars = y_true_trans.shape[1]
+        
+        if y_post_trans.shape[1] != n_vars:
             raise ValueError("Posterior ensemble columns do not match prior predictions columns.")
 
         for i in range(n_vars):
-            y_true = pred_prior[:, i]       
-            y_surr = prior_surr[:, i]       
-            y_post = posterior_ensemble[:, i] 
+            y_t = y_true_trans[:, i]       # Truth (Transformed)
+            y_s = prior_surr_trans[:, i]   # Surrogate (Transformed)
+            y_p = y_post_trans[:, i]       # Posterior (Transformed)
             
-            if method == 'polynomial':
+            if method == 'linear':
                 try:
-                    p = Polynomial.fit(y_surr, y_true, deg=poly_order)
-                    corrected_posterior[:, i] = p(y_post)
+                    # Linear Regression (Degree 1)
+                    p = Polynomial.fit(y_s, y_t, deg=1)
+                    corrected_post_trans[:, i] = p(y_p)
                 except:
-                    corrected_posterior[:, i] = y_post 
+                    corrected_post_trans[:, i] = y_p
+
+            elif method == 'polynomial':
+                try:
+                    # Polynomial Regression (Degree N)
+                    p = Polynomial.fit(y_s, y_t, deg=poly_order)
+                    corrected_post_trans[:, i] = p(y_p)
+                except:
+                    corrected_post_trans[:, i] = y_p
+
+            elif method == 'quantile':
+                # Quantile Mapping (CDF Matching)
+                sort_idx_surr = np.argsort(y_s)
+                y_s_sorted = y_s[sort_idx_surr]
+                y_t_sorted = np.sort(y_t)
+                
+                # SAFE IMPLEMENTATION: Clamp to min/max of prior to avoid explosion
+                # We use 'fill_value' to clip extrapolation to the observed prior range
+                f_quant = interp1d(y_s_sorted, y_t_sorted, kind='linear', 
+                                   bounds_error=False, 
+                                   fill_value=(y_t_sorted[0], y_t_sorted[-1]))
+                corrected_post_trans[:, i] = f_quant(y_p)
 
             elif method == 'error_inflation':
-                error = y_true - y_surr
+                error = y_t - y_s
                 std_error = np.std(error)
-                noise = np.random.normal(0, std_error, size=y_post.shape)
-                corrected_posterior[:, i] = y_post + noise
+                noise = np.random.normal(0, std_error, size=y_p.shape)
+                corrected_post_trans[:, i] = y_p + noise
         
+        # 4. Inverse Transform back to Original Space
+        if self.pred_transform == 'log':
+            corrected_posterior = 10**corrected_post_trans
+        elif self.pred_transform == 'logit':
+            y_01 = expit(corrected_post_trans)
+            a, b = self.pred_bounds
+            corrected_posterior = y_01 * (b - a) + a
+        else:
+            corrected_posterior = corrected_post_trans
+
         print("Bias correction complete.")
         return corrected_posterior
 
@@ -567,16 +635,12 @@ class DSISurrogate:
                 inversion_type='rml', solver='analytical',
                 n_posterior_samples=500, n_ies_iterations=3, 
                 gd_learning_rate=1e-7, return_ensemble=False):
-        """
-        Performs prediction using the fitted DSI surrogate.
-        """
         if not self.is_fitted_:
             raise RuntimeError("Surrogate model has not been fitted. Call .fit() first.")
 
         h_obs_single_orig = h_observed.copy().reshape(1, -1)
         obs_noise_std_orig = obs_noise_std.copy().reshape(1, -1)
 
-        # --- Transform observed data and noise ---
         if self.log_transform_obs:
             h_obs_processed = np.log10(np.maximum(h_obs_single_orig, self.epsilon))
             obs_noise_std_processed = obs_noise_std_orig / (np.maximum(h_obs_single_orig, self.epsilon) * np.log(10))
@@ -595,7 +659,6 @@ class DSISurrogate:
              h_target_final = h_obs_scaled.flatten()
              avg_noise_variance_final = np.mean(obs_noise_var_processed)
 
-        # --- Choose Solver Function ---
         solver_map = {
             'analytical': self._solve_map_analytical,
             'cg': self._solve_map_cg,
@@ -605,7 +668,6 @@ class DSISurrogate:
             raise ValueError(f"Invalid solver type '{solver}'. Choose 'analytical', 'cg', or 'ls'.")
         solve_map_func = solver_map[solver]
 
-        # --- Perform Inversion ---
         x_posterior = None
         if inversion_type == 'map':
             print(f"\n--- Performing Single MAP Estimation using '{solver}' solver ---")
@@ -626,11 +688,9 @@ class DSISurrogate:
             if self.pca_obs_: noisy_h_targets = self.pca_obs_.transform(noisy_h_scaled)
             else: noisy_h_targets = noisy_h_scaled
 
-            # Generate Prior Samples for Regularization
             n_comp = self.surrogate_components_['n_components']
             x_prior_samples = np.random.normal(0.0, 1.0, size=(n_posterior_samples, n_comp))
 
-            # --- Optimization: Improved Dask Client Management ---
             try:
                 try:
                     client = get_client()
@@ -679,7 +739,6 @@ class DSISurrogate:
         if x_posterior is None or x_posterior.shape[0] == 0:
              raise RuntimeError("Posterior parameter estimation failed.")
 
-        # --- Calculate Metrics & Generate Predictions ---
         x_posterior_mean = np.mean(x_posterior, axis=0)
         calibration_metrics = self._calculate_calibration_metrics(
             x_posterior_mean, h_obs_single_orig, avg_noise_variance_final, h_target_final
