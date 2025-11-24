@@ -1,4 +1,4 @@
-# Unconfined Aquifer Test Case: Non-Linear Inversion & Bias Correction
+# Unconfined Aquifer Test Case
 
 This example demonstrates the application of **DSIpy** to a challenging, non-linear groundwater problem: estimating drawdown in a heterogeneous unconfined aquifer under heavy stress.
 
