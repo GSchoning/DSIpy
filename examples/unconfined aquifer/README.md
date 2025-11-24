@@ -57,10 +57,6 @@ We aim to predict **Drawdown** at a sensitive receptor located downstream (Row 2
     ```
     *(This will display the diagnostic plots and final posterior distribution)*.
 
-3.  **Visualize the Physics:**
-    ```bash
-    python plot_context.py
-    ```
 
 ## 📊 Expected Results
 
