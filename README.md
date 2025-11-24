@@ -1,4 +1,4 @@
-# DSIpy: Data Space Inversion & Bayesian Evidential Learning
+# DSIpy: Data Space Inversion, Uncertainty Quantification and Bias correction ( A Bayesian Evidential Learning Framework ) 
 
 **DSIpy** is a lightweight, high-performance Python module for **Data Space Inversion (DSI)** and **Bayesian Evidential Learning (BEL)**.
 
