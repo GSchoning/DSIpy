@@ -30,7 +30,7 @@ pip install numpy pandas scipy scikit-learn dask[distributed] matplotlib
 Since DSIpy is a standalone module, you can simply clone this repository and import the class:
 
 ```bash
-git clone [https://github.com/yourusername/dsipy.git](https://github.com/yourusername/dsipy.git)
+git clone https://github.com/yourusername/dsipy.git
 cd dsipy
 ```
 
@@ -206,13 +206,15 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
 
 * **DSI Implementation & Methodology:**
-    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. https://doi.org/10.1016/j.jhydrol.2021.127296
+    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. [https://doi.org/10.1016/j.jhydrol.2021.127296](https://doi.org/10.1016/j.jhydrol.2021.127296)
 * **Data Space Inversion (Foundational Theory):**
     Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using data-space inversion. *Computational Geosciences*, 19(5), 931-951.
 * **Bayesian Evidential Learning (BEL):**
     Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press.
 * **ES-MDA (Algorithm used for IES):**
     Emerick, A. A., & Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. *Computers & Geosciences*, 55, 3-15.
+* **Bias Correction (Quantile Mapping):**
+    Wood, A. W., Leung, L. R., Sridhar, V., & Lettenmaier, D. P. (2004). Hydrologic implications of dynamical and statistical approaches to downscaling climate model outputs. *Climatic Change*, 62(1), 189–216.
 * **Randomized Maximum Likelihood (RML):**
     Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11.
 
