@@ -182,7 +182,7 @@ Data Space Inversion (DSI) constructs a statistical surrogate model based on the
 The resulting linear surrogate model is:
 
 $$
-\begin{bmatrix} d \\ h \end{bmatrix} \approx \begin{bmatrix} \mu_d \\ \mu_h \end{bmatrix} + \begin{bmatrix} M_d \\ M_h \end{bmatrix} x
+\left[ \begin{array}{c} d \\ h \end{array} \right] \approx \left[ \begin{array}{c} \mu_d \\ \mu_h \end{array} \right] + \left[ \begin{array}{c} M_d \\ M_h \end{array} \right] x
 $$
 
 Where:
