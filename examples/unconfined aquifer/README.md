@@ -56,10 +56,3 @@ We aim to predict **Drawdown** at a sensitive receptor located downstream (Row 2
     python run_inversion.py
     ```
     *(This will display the diagnostic plots and final posterior distribution)*.
-
-
-## 📊 Expected Results
-
-1.  **Diagnostic Plot:** You should see a curved "Banana" relationship between the Surrogate and True Physics, confirming the non-linearity of the unconfined flow.
-2.  **Bias Correction:** The `auto` correction mode should detect this non-linearity and apply Quantile Mapping.
-3.  **Validation:** The corrected posterior distribution should accurately encompass the "True" drawdown value (dashed black line), correctly characterizing the risk of extreme drawdown events.
