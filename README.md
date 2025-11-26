@@ -31,7 +31,7 @@ pip install numpy pandas scipy scikit-learn dask[distributed] matplotlib
 Since DSIpy is a standalone module, you can simply clone this repository and import the class:
 
 ```bash
-git clone https://github.com/yourusername/dsipy.git
+git clone [https://github.com/yourusername/dsipy.git](https://github.com/yourusername/dsipy.git)
 cd dsipy
 ```
 
@@ -207,9 +207,9 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
 
 * **DSI Implementation & Methodology:**
-    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. [https://doi.org/10.1016/j.jhydrol.2021.127296](https://doi.org/10.1016/j.jhydrol.2021.127296)
+    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. https://doi.org/10.1016/j.jhydrol.2021.127296
 * **Data Space Inversion (Foundational Theory):**
-    Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using production data without history matching. *Computational Geosciences*, 19(5), 931–951. [https://doi.org/10.1007/s10596-015-9507-z](https://doi.org/10.1007/s10596-015-9507-z)
+    Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using production data without history matching. *Computational Geosciences*, 19(5), 931–951. https://doi.org/10.1007/s10596-015-9507-z
 * **Bayesian Evidential Learning (BEL):**
     Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press.
 * **ES-MDA (Algorithm used for IES):**
@@ -221,7 +221,7 @@ If you use DSIpy in your research, please consider citing the following foundati
 
 ## 🌟 Acknowledgements
 
-Special thanks to **John Doherty** (Watermark Numerical Computing) for suggesting the implementation of **Posterior Refinement** (bias correction). His insights into handling structural error and non-linearity in surrogate-based inversion were instrumental in the development of the diagnostic and correction workflows included in this module.
+This work is heavily inspired by the pioneering contributions of **John Doherty** (Watermark Numerical Computing) to the field of groundwater uncertainty quantification. As the author of **PEST** and **PEST++**, his philosophy on embracing non-uniqueness and his specific guidance on handling structural error in surrogate models were the direct inspiration for the **Posterior Refinement** workflows implemented in this module.
 
 ## License
 
