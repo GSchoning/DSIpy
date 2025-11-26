@@ -206,7 +206,7 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
 
 * **DSI Implementation & Methodology:**
-    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. https://doi.org/10.1016/j.jhydrol.2021.127296
+    Delottier, H., Doherty, J., & Brunner, P. (2023). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. Geoscientific Model Development, 16(14), 4213-4231. https://doi.org/10.5194/gmd-16-4213-2023
 * **Bayesian Evidential Learning (BEL):**
     Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press.
 * **ES-MDA (Algorithm used for IES):**
