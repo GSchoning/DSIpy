@@ -221,7 +221,7 @@ If you use DSIpy in your research, please consider citing the following foundati
 
 ## 🌟 Acknowledgements
 
-This work is heavily inspired by the pioneering contributions of **John Doherty** (Watermark Numerical Computing) to the field of groundwater uncertainty quantification. As the author of **PEST** and **PEST++**, his philosophy on embracing non-uniqueness and his specific guidance on handling structural error in surrogate models were the direct inspiration for the **Posterior Refinement** workflows implemented in this module.
+This work is heavily inspired by the pioneering contributions of **John Doherty** (Watermark Numerical Computing) to the field of groundwater uncertainty quantification. As the author of the **PEST** suite, his philosophy on embracing non-uniqueness and his specific guidance on handling structural error in surrogate models were the direct inspiration for the **Posterior Refinement** workflows implemented in this module.
 
 ## License
 
