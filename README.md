@@ -12,7 +12,7 @@ It provides a framework for quantifying uncertainty in complex physical systems 
     * **RML:** Randomized Maximum Likelihood for robust uncertainty quantification.
     * **ES:** Ensemble Smoother for rapid, linear-Gaussian updates.
     * **IES / ES-MDA:** Iterative Ensemble Smoother with Multiple Data Assimilation for robustly handling non-linearities.
-* **Bias Correction:** Post-processing tools to diagnose surrogate error and correct posterior predictions using **auto-pilot**, **quantile mapping**, **polynomial/linear regression**, or **error inflation**.
+* **Non-Linearity Correction:** Post-processing tools to diagnose structural surrogate error and refine posterior predictions using **auto-pilot**, **quantile mapping**, **polynomial/linear regression**, or **error inflation**.
 * **Parallel Computing:** Integrated **Dask** support for parallelizing RML inversions across cores.
 * **Data Transformations:** Built-in handling for Log10 (orders of magnitude) and Logit (bounded variables like saturation) transforms.
 * **Model Persistence:** Save and load trained surrogate models to/from disk (Pickle format).
@@ -30,7 +30,7 @@ pip install numpy pandas scipy scikit-learn dask[distributed] matplotlib
 Since DSIpy is a standalone module, you can simply clone this repository and import the class:
 
 ```bash
-git clone [https://github.com/yourusername/dsipy.git](https://github.com/yourusername/dsipy.git)
+git clone https://github.com/yourusername/dsipy.git
 cd dsipy
 ```
 
@@ -99,11 +99,11 @@ mean, std, _ = dsi_sat.predict(
 )
 ```
 
-### 3. Dealing with Non-Linearity (Bias Correction)
+### 3. Handling Structural Error (Non-Linearity Correction)
 
-DSI relies on a linear surrogate ($d = \mu + Mx$). If the physical relationship between observations and predictions is highly non-linear, the surrogate may introduce a systematic bias. DSIpy includes tools to **diagnose** this bias (by running the surrogate on the prior) and **correct** the posterior predictions.
+DSI relies on a linear surrogate ($d = \mu + Mx$). If the physical relationship between observations and predictions is highly non-linear (e.g., threshold behaviors, saturation fronts), the surrogate may introduce a systematic structural error. DSIpy includes tools to **diagnose** this error and **correct** the posterior predictions.
 
-**Step 1: Diagnose Bias**
+**Step 1: Diagnose Non-Linearity**
 Generate a scatter plot of *True Physics* vs. *Surrogate Prediction* for your prior ensemble.
 
 ```python
@@ -130,7 +130,7 @@ posterior_corrected = dsi.apply_bias_correction(
     method='auto' # Options: 'auto', 'quantile', 'polynomial', 'linear', 'error_inflation'
 )
 ```
-*Note: `method='auto'` checks the correlation for each variable. If correlation is high (>0.6), it applies **Quantile Mapping** to fix non-linearity/bounds. If correlation is low, it applies **Error Inflation** to safely widen uncertainty.*
+*Note: `method='auto'` checks the correlation for each variable. If correlation is high (>0.6), it applies **Quantile Mapping** to fix non-linearity and physical bounds. If correlation is low, it applies **Error Inflation** to safely widen uncertainty bounds.*
 
 ## 📖 Documentation
 
@@ -176,8 +176,8 @@ dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 Data Space Inversion (DSI) constructs a statistical surrogate model based on the **joint covariance** of the observations and predictions.
 
 1.  **The Prior:** We generate $N$ realizations of the physical model. Each realization produces a vector of simulated observations ($d$) and a target prediction ($h$).
-2.  **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^\ast$ and $h^\ast$.
-3.  **The Joint Surrogate:** We concatenate $d^\ast$ and $h^\ast$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
+2.  **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^*$ and $h^*$.
+3.  **The Joint Surrogate:** We concatenate $d^*$ and $h^*$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
 
 The resulting linear surrogate model is:
 
@@ -206,7 +206,9 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
 
 * **DSI Implementation & Methodology:**
-    Delottier, H., Doherty, J., & Brunner, P. (2023). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. Geoscientific Model Development, 16(14), 4213-4231. https://doi.org/10.5194/gmd-16-4213-2023
+    Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. [https://doi.org/10.1016/j.jhydrol.2021.127296](https://doi.org/10.1016/j.jhydrol.2021.127296)
+* **Data Space Inversion (Foundational Theory):**
+    Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using production data without history matching. *Computational Geosciences*, 19(5), 931–951. [https://doi.org/10.1007/s10596-015-9507-z](https://doi.org/10.1007/s10596-015-9507-z)
 * **Bayesian Evidential Learning (BEL):**
     Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press.
 * **ES-MDA (Algorithm used for IES):**
