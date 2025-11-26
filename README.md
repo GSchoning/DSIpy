@@ -1,4 +1,5 @@
-# DSIpy: Data Space Inversion & Bayesian Evidential Learning
+# DSIpy: Data Space Inversion, Uncertainty Quantification & Posterior Refinement
+### A Framework for Bayesian Evidential Learning
 
 **DSIpy** is a lightweight, high-performance Python module for **Data Space Inversion (DSI)** and **Bayesian Evidential Learning (BEL)**.
 
@@ -12,7 +13,7 @@ It provides a framework for quantifying uncertainty in complex physical systems 
     * **RML:** Randomized Maximum Likelihood for robust uncertainty quantification.
     * **ES:** Ensemble Smoother for rapid, linear-Gaussian updates.
     * **IES / ES-MDA:** Iterative Ensemble Smoother with Multiple Data Assimilation for robustly handling non-linearities.
-* **Non-Linearity Correction:** Post-processing tools to diagnose structural surrogate error and refine posterior predictions using **auto-pilot**, **quantile mapping**, **polynomial/linear regression**, or **error inflation**.
+* **Posterior Refinement:** Post-processing tools to diagnose structural surrogate error and refine posterior predictions using **auto-pilot**, **quantile mapping**, **polynomial/linear regression**, or **error inflation**.
 * **Parallel Computing:** Integrated **Dask** support for parallelizing RML inversions across cores.
 * **Data Transformations:** Built-in handling for Log10 (orders of magnitude) and Logit (bounded variables like saturation) transforms.
 * **Model Persistence:** Save and load trained surrogate models to/from disk (Pickle format).
@@ -99,11 +100,11 @@ mean, std, _ = dsi_sat.predict(
 )
 ```
 
-### 3. Handling Structural Error (Non-Linearity Correction)
+### 3. Dealing with Non-Linearity (Posterior Refinement)
 
-DSI relies on a linear surrogate ($d = \mu + Mx$). If the physical relationship between observations and predictions is highly non-linear (e.g., threshold behaviors, saturation fronts), the surrogate may introduce a systematic structural error. DSIpy includes tools to **diagnose** this error and **correct** the posterior predictions.
+DSI relies on a linear surrogate ($d = \mu + Mx$). If the physical relationship between observations and predictions is highly non-linear (e.g., threshold behaviors, saturation fronts), the surrogate may introduce a systematic structural error. DSIpy includes tools to **diagnose** this error (by running the surrogate on the prior) and **refine** the posterior predictions.
 
-**Step 1: Diagnose Non-Linearity**
+**Step 1: Diagnose Structural Error**
 Generate a scatter plot of *True Physics* vs. *Surrogate Prediction* for your prior ensemble.
 
 ```python
@@ -115,22 +116,22 @@ dsi.diagnose_surrogate_bias(
 )
 ```
 
-**Step 2: Apply Correction**
-Apply a statistical correction to the posterior results based on the relationship learned from the Prior.
+**Step 2: Apply Refinement**
+Apply a statistical mapping to the posterior results based on the relationship learned from the Prior.
 
 ```python
-# Get the "biased" posterior from the inversion
-_, _, _, posterior_biased = dsi.predict(..., return_ensemble=True)
+# Get the "raw" posterior from the inversion
+_, _, _, posterior_raw = dsi.predict(..., return_ensemble=True)
 
-# Correct it based on the relationship learned from the Prior
-posterior_corrected = dsi.apply_bias_correction(
-    posterior_ensemble=posterior_biased,
+# Refine it based on the relationship learned from the Prior
+posterior_refined = dsi.apply_bias_correction(
+    posterior_ensemble=posterior_raw,
     obs_prior=obs_prior,
     pred_prior=pred_prior,
     method='auto' # Options: 'auto', 'quantile', 'polynomial', 'linear', 'error_inflation'
 )
 ```
-*Note: `method='auto'` checks the correlation for each variable. If correlation is high (>0.6), it applies **Quantile Mapping** to fix non-linearity and physical bounds. If correlation is low, it applies **Error Inflation** to safely widen uncertainty bounds.*
+*Note: `method='auto'` checks the correlation for each variable. If correlation is high (>0.6), it applies **Quantile Mapping** to resolve non-linearity/bounds. If correlation is low, it applies **Error Inflation** to safely widen uncertainty.*
 
 ## 📖 Documentation
 
@@ -176,8 +177,8 @@ dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 Data Space Inversion (DSI) constructs a statistical surrogate model based on the **joint covariance** of the observations and predictions.
 
 1.  **The Prior:** We generate $N$ realizations of the physical model. Each realization produces a vector of simulated observations ($d$) and a target prediction ($h$).
-2.  **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^*$ and $h^*$.
-3.  **The Joint Surrogate:** We concatenate $d^*$ and $h^*$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
+2.  **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^\ast$ and $h^\ast$.
+3.  **The Joint Surrogate:** We concatenate $d^\ast$ and $h^\ast$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
 
 The resulting linear surrogate model is:
 
@@ -220,7 +221,7 @@ If you use DSIpy in your research, please consider citing the following foundati
 
 ## 🌟 Acknowledgements
 
-Special thanks to **John Doherty** (Watermark Numerical Computing) for suggesting the implementation of **post-calibration bias correction**. His insights into handling structural error and non-linearity in surrogate-based inversion were instrumental in the development of the bias diagnostic and correction workflows included in this module.
+Special thanks to **John Doherty** (Watermark Numerical Computing) for suggesting the implementation of **Posterior Refinement** (bias correction). His insights into handling structural error and non-linearity in surrogate-based inversion were instrumental in the development of the diagnostic and correction workflows included in this module.
 
 ## License
 
