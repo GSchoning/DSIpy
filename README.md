@@ -135,6 +135,7 @@ posterior_refined = dsi.apply_bias_correction(
 )
 ```
 *Note: `method='auto'` checks the correlation for each variable. If correlation is high (>0.6), it applies **Quantile Mapping** to resolve non-linearity/bounds. If correlation is low, it applies **Error Inflation** to safely widen uncertainty.*
+<img width="494" height="341" alt="diagnostic plot" src="https://github.com/user-attachments/assets/84ff91e0-2cd9-48f5-bff8-ecc040431c51" />
 <img width="560" height="437" alt="baiscorrection" src="https://github.com/user-attachments/assets/092f0caf-3610-49bf-8a9e-18cd03c8845a" />
 ## 📖 Documentation
 
