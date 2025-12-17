@@ -224,14 +224,14 @@ Since the surrogate relates observations $d$ directly to the latent variables $x
 
 When we observe real field data ($d_{obs}$), we solve for the optimal latent vector $x_{post}$ that minimizes the mismatch between the surrogate output ($\mu_d + M_d x$) and the field data. Because $x$ controls both $d$ and $h$, determining $x_{post}$ automatically determines the posterior prediction $h_{post}$.
 
-### Why use DSI?
+### Why use DSIpy?
 
-* **Speed:** Once the ensemble is generated, DSI inversion takes seconds, whereas traditional history matching might take weeks.
+* **Speed:** Once the ensemble is generated, DSI inversion takes fractions of a second
 
-* **Uncertainty:** DSI naturally preserves the geologic variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution (P10, P50, P90).
+* **Uncertainty:** The workflow preserves the variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution
 
-* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)**, DSI can handle mild non-linearities in the data-prediction relationship.
-
+* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)** pared with posterior refinement, DSI can handle mild non-linearities in the data-prediction relationship.
+i
 ## 🔬 References
 
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
