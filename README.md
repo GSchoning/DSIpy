@@ -183,7 +183,7 @@ posterior_refined = dsi.apply_bias_correction(
 
 ## 💾 Saving and Loading
 
-Train on a high-performance cluster, save the model, and predict on a laptop.
+Train on a high-performance cluster, save the model, and predict on laptop or in the cloud.
 
 ```
 # Save
