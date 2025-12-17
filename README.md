@@ -113,7 +113,7 @@ mean, std, _ = dsi_sat.predict(
 
 ### 3. Dealing with Non-Linearity (Posterior Refinement)
 
-DSI relies on a linear surrogate ($d = \mu + Mx$). If the physical relationship between observations and predictions is highly non-linear (e.g., threshold behaviors, saturation fronts), the surrogate may introduce a systematic structural error. DSIpy includes tools to **diagnose** this error (by running the surrogate on the prior) and **refine** the posterior predictions.
+DSI relies on a linear surrogate ($d = \mu + M x$). If the physical relationship between observations and predictions is highly non-linear (e.g., threshold behaviors, saturation fronts), the surrogate may introduce a systematic structural error. DSIpy includes tools to **diagnose** this error (by running the surrogate on the prior) and **refine** the posterior predictions.
 
 **Step 1: Diagnose Structural Error**
 Generate a scatter plot of *True Physics* vs. *Surrogate Prediction* for your prior ensemble.
@@ -198,9 +198,9 @@ Data Space Inversion (DSI) constructs a statistical surrogate model based on the
 
 1. **The Prior:** We generate $N$ realizations of the physical model. Each realization produces a vector of simulated observations ($d$) and a target prediction ($h$).
 
-2. **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^*$ and $h^*$.
+2. **Dimension Reduction:** We perform Principal Component Analysis (PCA) on $d$ and $h$ separately to reduce noise and dimensionality, resulting in $d^\ast$ and $h^\ast$.
 
-3. **The Joint Surrogate:** We concatenate $d^*$ and $h^*$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
+3. **The Joint Surrogate:** We concatenate $d^\ast$ and $h^\ast$ and perform a Singular Value Decomposition (SVD). This reveals a low-dimensional **latent space** ($x$) that drives the variability in *both* the data and the prediction.
 
 The resulting linear surrogate model is:
 
