@@ -239,9 +239,7 @@ If you use DSIpy in your research, please consider citing the following foundati
 * **DSI Implementation & Methodology:**
   Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. https://doi.org/10.1016/j.jhydrol.2021.127296
 
-* **Data Space Inversion (Foundational Theory):**
-  Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using production data without history matching. *Computational Geosciences*, 19(5), 931-951. https://doi.org/10.1007/s10596-015-9507-z
-
+ 
 * **Bayesian Evidential Learning (BEL):**
   Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press.
 
