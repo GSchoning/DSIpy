@@ -233,16 +233,14 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 * **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)** pared with posterior refinement, DSI can handle mild non-linearities in the data-prediction relationship.
 i
 ## 🔬 References
-
-If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
 * **DSI Implementation & Methodology:**
-  Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. [https://doi.org/10.1016/j.jhydrol.2021.127296](https://doi.org/10.1016/j.jhydrol.2021.127296)
+  Delottier, H., Schilling, O. S., & Brunner, P. (2023). DSI v1.0: a data-space inversion tool for computationally efficient uncertainty quantification and calibration of groundwater models. *Geoscientific Model Development*, 16(14), 4213–4228. [https://gmd.copernicus.org/articles/16/4213/2023/](https://gmd.copernicus.org/articles/16/4213/2023/)
 
 * **Data Space Inversion (Foundational Theory):**
   Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using production data without history matching. *Computational Geosciences*, 19(5), 931-951. [https://doi.org/10.1007/s10596-015-9507-z](https://doi.org/10.1007/s10596-015-9507-z)
 
 * **Bayesian Evidential Learning (BEL):**
-  Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press. [ISBN: 9781108426022](https://www.cambridge.org/core/books/quantifying-uncertainty-in-subsurface-systems/20138C407C9A4384B4810260460A7951)
+  Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press. [https://doi.org/10.1017/9781108539661](https://doi.org/10.1017/9781108539661)
 
 * **ES-MDA (Algorithm used for IES):**
   Emerick, A. A., & Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. *Computers & Geosciences*, 55, 3-15. [https://doi.org/10.1016/j.cageo.2012.03.011](https://doi.org/10.1016/j.cageo.2012.03.011)
@@ -251,8 +249,7 @@ If you use DSIpy in your research, please consider citing the following foundati
   Wood, A. W., Leung, L. R., Sridhar, V., & Lettenmaier, D. P. (2004). Hydrologic implications of dynamical and statistical approaches to downscaling climate model outputs. *Climatic Change*, 62(1), 189-216. [https://doi.org/10.1023/B:CLIM.0000013685.99609.9e](https://doi.org/10.1023/B:CLIM.0000013685.99609.9e)
 
 * **Randomized Maximum Likelihood (RML):**
-  Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11. [https://doi.org/10.3997/2214-4609.201406894](https://doi.org/10.3997/2214-4609.201406894)
-
+  Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11.
 ## 🌟 Acknowledgements
 
 This work is inspired by the pioneering contributions of **John Doherty** (Watermark Numerical Computing) to the field of groundwater uncertainty quantification. As the author of the **PEST** suite, his philosophy on embracing non-uniqueness and his specific guidance on handling structural error in surrogate models were the direct inspiration for the **Posterior Refinement** workflows implemented in this module.
