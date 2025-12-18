@@ -113,7 +113,7 @@ mean, std, _ = dsi_sat.predict(
 
 ### 3. Dealing with Non-Linearity (Posterior Refinement)
 
-DSI relies on a linear surrogate ($d = \mu + M x$). If the physical relationship between observations and predictions is highly non-linear (e.g., threshold behaviors, saturation fronts), the surrogate may introduce a systematic structural error. DSIpy includes tools to **diagnose** this error (by running the surrogate on the prior) and **refine** the posterior predictions.
+DSI relies on a linear surrogate ($d = \mu + Mx$). If the physical relationship between observations and predictions is highly non-linear (e.g., threshold behaviors, saturation fronts), the surrogate may introduce a systematic structural error. DSIpy includes tools to **diagnose** this error (by running the surrogate on the prior) and **refine** the posterior predictions.
 
 **Step 1: Diagnose Structural Error**
 Generate a scatter plot of *True Physics* vs. *Surrogate Prediction* for your prior ensemble.
@@ -224,32 +224,36 @@ Since the surrogate relates observations $d$ directly to the latent variables $x
 
 When we observe real field data ($d_{obs}$), we solve for the optimal latent vector $x_{post}$ that minimizes the mismatch between the surrogate output ($\mu_d + M_d x$) and the field data. Because $x$ controls both $d$ and $h$, determining $x_{post}$ automatically determines the posterior prediction $h_{post}$.
 
-### Why use DSIpy?
+### Why use DSI?
 
-* **Speed:** Once the ensemble is generated, DSI inversion takes fractions of a second
+* **Speed:** Once the ensemble is generated, DSI inversion takes seconds, whereas traditional history matching might take weeks.
 
-* **Uncertainty:** The workflow preserves the variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution
+* **Uncertainty:** DSI naturally preserves the geologic variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution (P10, P50, P90).
 
-* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)** pared with posterior refinement, DSI can handle mild non-linearities in the data-prediction relationship.
-i
+* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)**, DSI can handle mild non-linearities in the data-prediction relationship.
+
 ## 🔬 References
+
+If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
+
 * **DSI Implementation & Methodology:**
   Delottier, H., Schilling, O. S., & Brunner, P. (2023). DSI v1.0: a data-space inversion tool for computationally efficient uncertainty quantification and calibration of groundwater models. *Geoscientific Model Development*, 16(14), 4213–4228. [https://gmd.copernicus.org/articles/16/4213/2023/](https://gmd.copernicus.org/articles/16/4213/2023/)
 
 * **Data Space Inversion (Foundational Theory):**
-  Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using production data without history matching. *Computational Geosciences*, 19(5), 931-951. [https://doi.org/10.1007/s10596-015-9507-z](https://doi.org/10.1007/s10596-015-9507-z)
+  Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using production data without history matching. *Computational Geosciences*, 19(5), 931-951. [https://link.springer.com/article/10.1007/s10596-015-9507-z](https://link.springer.com/article/10.1007/s10596-015-9507-z)
 
 * **Bayesian Evidential Learning (BEL):**
-  Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press. [https://doi.org/10.1017/9781108539661](https://doi.org/10.1017/9781108539661)
+  Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. AGU/Wiley. [https://agupubs.onlinelibrary.wiley.com/doi/book/10.1002/9781119325888](https://agupubs.onlinelibrary.wiley.com/doi/book/10.1002/9781119325888)
 
 * **ES-MDA (Algorithm used for IES):**
   Emerick, A. A., & Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. *Computers & Geosciences*, 55, 3-15. [https://doi.org/10.1016/j.cageo.2012.03.011](https://doi.org/10.1016/j.cageo.2012.03.011)
 
 * **Bias Correction (Quantile Mapping):**
-  Wood, A. W., Leung, L. R., Sridhar, V., & Lettenmaier, D. P. (2004). Hydrologic implications of dynamical and statistical approaches to downscaling climate model outputs. *Climatic Change*, 62(1), 189-216. [https://doi.org/10.1023/B:CLIM.0000013685.99609.9e](https://doi.org/10.1023/B:CLIM.0000013685.99609.9e)
+  Wood, A. W., Leung, L. R., Sridhar, V., & Lettenmaier, D. P. (2004). Hydrologic implications of dynamical and statistical approaches to downscaling climate model outputs. *Climatic Change*, 62(1), 189-216. [https://link.springer.com/article/10.1023/B:CLIM.0000013685.99609.9e](https://link.springer.com/article/10.1023/B:CLIM.0000013685.99609.9e)
 
 * **Randomized Maximum Likelihood (RML):**
-  Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11.
+  Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11. [https://doi.org/10.3997/2214-4609.201406894](https://doi.org/10.3997/2214-4609.201406894)
+
 ## 🌟 Acknowledgements
 
 This work is inspired by the pioneering contributions of **John Doherty** (Watermark Numerical Computing) to the field of groundwater uncertainty quantification. As the author of the **PEST** suite, his philosophy on embracing non-uniqueness and his specific guidance on handling structural error in surrogate models were the direct inspiration for the **Posterior Refinement** workflows implemented in this module.
