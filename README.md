@@ -235,22 +235,23 @@ i
 ## 🔬 References
 
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
-
 * **DSI Implementation & Methodology:**
-  Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. https://doi.org/10.1016/j.jhydrol.2021.127296
+  Delottier, H., Doherty, J., & Brunner, P. (2022). Data space inversion for efficient uncertainty quantification using an integrated surface and sub-surface hydrologic model. *Journal of Hydrology*, 605, 127296. [https://doi.org/10.1016/j.jhydrol.2021.127296](https://doi.org/10.1016/j.jhydrol.2021.127296)
 
- 
+* **Data Space Inversion (Foundational Theory):**
+  Satija, A., & Caers, J. (2015). Direct forecasting of reservoir performance using production data without history matching. *Computational Geosciences*, 19(5), 931-951. [https://doi.org/10.1007/s10596-015-9507-z](https://doi.org/10.1007/s10596-015-9507-z)
+
 * **Bayesian Evidential Learning (BEL):**
-  Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press.
+  Scheidt, C., Li, L., & Caers, J. (2018). *Quantifying Uncertainty in Subsurface Systems*. Cambridge University Press. [ISBN: 9781108426022](https://www.cambridge.org/core/books/quantifying-uncertainty-in-subsurface-systems/20138C407C9A4384B4810260460A7951)
 
 * **ES-MDA (Algorithm used for IES):**
-  Emerick, A. A., & Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. *Computers & Geosciences*, 55, 3-15.
+  Emerick, A. A., & Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. *Computers & Geosciences*, 55, 3-15. [https://doi.org/10.1016/j.cageo.2012.03.011](https://doi.org/10.1016/j.cageo.2012.03.011)
 
 * **Bias Correction (Quantile Mapping):**
-  Wood, A. W., Leung, L. R., Sridhar, V., & Lettenmaier, D. P. (2004). Hydrologic implications of dynamical and statistical approaches to downscaling climate model outputs. *Climatic Change*, 62(1), 189-216.
+  Wood, A. W., Leung, L. R., Sridhar, V., & Lettenmaier, D. P. (2004). Hydrologic implications of dynamical and statistical approaches to downscaling climate model outputs. *Climatic Change*, 62(1), 189-216. [https://doi.org/10.1023/B:CLIM.0000013685.99609.9e](https://doi.org/10.1023/B:CLIM.0000013685.99609.9e)
 
 * **Randomized Maximum Likelihood (RML):**
-  Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11.
+  Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11. [https://doi.org/10.3997/2214-4609.201406894](https://doi.org/10.3997/2214-4609.201406894)
 
 ## 🌟 Acknowledgements
 
