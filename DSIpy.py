@@ -1,56 +1,36 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, QuantileTransformer
 from sklearn.decomposition import PCA
 from scipy.linalg import solve
 from scipy.optimize import minimize, least_squares
 from scipy.special import logit, expit
 from scipy.interpolate import interp1d
 from numpy.polynomial import Polynomial
-import dask
-from dask import delayed
-from dask.distributed import Client, LocalCluster, get_client
 import warnings
 import pickle
 import time
 
 # Suppress OptimizeWarning from scipy during CG convergence issues
 warnings.filterwarnings('ignore', category=RuntimeWarning, module='scipy.optimize')
-warnings.filterwarnings('ignore', category=np.VisibleDeprecationWarning) 
 
 class DSISurrogate:
     """
     Implements Data Space Inversion (DSI) using a covariance-based surrogate.
-
-    Builds a surrogate linking observations and predictions based on a prior
-    ensemble and allows conditioning using MAP, RML, ES, or IES (ES-MDA).
-
-    Args:
-        obs_pca_variance (float): Variance threshold for input PCA (e.g., 0.95).
-                                  Set >= 1.0 to skip input PCA.
-        pred_pca_variance (float): Variance threshold for output PCA (e.g., 0.99).
-                                   Set >= 1.0 to skip output PCA.
-        svd_variance (float): Variance threshold for surrogate SVD (e.g., 0.999).
-        log_transform_obs (bool): If True, applies log10 transform to observations.
-        pred_transform (str): Transform to apply to predictions:
-                              'log' -> log10(y) for [0, +inf) bounds.
-                              'logit' -> logit((y-a)/(b-a)) for [a, b] bounds.
-                              'none' -> No transform.
-        pred_bounds (list or tuple): Required if pred_transform='logit'. E.g., [0, 1].
-        epsilon (float): Small value to add/clip to avoid log(0) or logit(0/1).
-        regularization (float): Small value added to covariance diagonal for SVD stability.
     """
     def __init__(self, obs_pca_variance=1, pred_pca_variance=1,
                  svd_variance=0.9999,
-                 log_transform_obs=True, pred_transform='log',
+                 obs_transform='log',  # Options: 'log', 'normal_score', 'none'
+                 pred_transform='log',  # Options: 'log', 'logit', 'normal_score', 'none'
                  pred_bounds=None,
                  epsilon=1e-10, regularization=1e-9):
         
         self.obs_pca_variance = obs_pca_variance
         self.pred_pca_variance = pred_pca_variance
         self.svd_variance = svd_variance
-        self.log_transform_obs = log_transform_obs
+        
+        self.obs_transform = obs_transform
         self.pred_transform = pred_transform
         self.pred_bounds = pred_bounds
         self.epsilon = epsilon
@@ -61,52 +41,81 @@ class DSISurrogate:
             
         self.obs_scaler_ = None
         self.pred_scaler_ = None
+        self.obs_nst_ = None  # QuantileTransformer for Observations
+        self.pred_nst_ = None # QuantileTransformer for Predictions
+        
         self.pca_obs_ = None
         self.pca_pred_ = None
         self.surrogate_components_ = {}
         self.is_fitted_ = False
 
+    def _transform_data(self, data, kind='obs', direction='forward'):
+        """
+        Unified handler for Log, Logit, and Normal Score transforms.
+        """
+        method = self.obs_transform if kind == 'obs' else self.pred_transform
+        
+        # --- FORWARD (Physical -> Feature) ---
+        if direction == 'forward':
+            if method == 'normal_score':
+                # Lazy initialization of NST transformer
+                if kind == 'obs':
+                    if self.obs_nst_ is None:
+                        self.obs_nst_ = QuantileTransformer(output_distribution='normal', n_quantiles=min(len(data), 1000))
+                        return self.obs_nst_.fit_transform(data)
+                    return self.obs_nst_.transform(data)
+                else:
+                    if self.pred_nst_ is None:
+                        self.pred_nst_ = QuantileTransformer(output_distribution='normal', n_quantiles=min(len(data), 1000))
+                        return self.pred_nst_.fit_transform(data)
+                    return self.pred_nst_.transform(data)
+            
+            elif method == 'log':
+                return np.log10(np.maximum(data, self.epsilon))
+            
+            elif method == 'logit':
+                a, b = self.pred_bounds
+                scaled = (data - a) / (b - a)
+                return logit(np.clip(scaled, self.epsilon, 1 - self.epsilon))
+            
+            else:
+                return data
+
+        # --- INVERSE (Feature -> Physical) ---
+        else:
+            if method == 'normal_score':
+                transformer = self.obs_nst_ if kind == 'obs' else self.pred_nst_
+                return transformer.inverse_transform(data)
+            
+            elif method == 'log':
+                return 10**data
+            
+            elif method == 'logit':
+                a, b = self.pred_bounds
+                return expit(data) * (b - a) + a
+            
+            else:
+                return data
+
     def fit(self, obs_prior, pred_prior):
         """Builds the DSI surrogate model from the prior ensemble."""
         print("--- Fitting DSI Surrogate Model ---")
-        X_full = obs_prior.copy()
-        y_full = pred_prior.copy()
+        
+        # 1. Transform Data (Log / Logit / Normal Score)
+        print(f"Transforming Observations ({self.obs_transform})...")
+        X_full = self._transform_data(obs_prior, kind='obs', direction='forward')
+        
+        print(f"Transforming Predictions ({self.pred_transform})...")
+        y_full = self._transform_data(pred_prior, kind='pred', direction='forward')
 
-        # --- 1a. Apply Log Transform (Observations) ---
-        if self.log_transform_obs:
-            print("Applying log10 transform to observations...")
-            X_full = np.log10(np.maximum(X_full, self.epsilon))
-            
-        # --- 1b. Apply Transform (Predictions) ---
-        if self.pred_transform == 'log':
-            print("Applying log10 transform to predictions...")
-            y_full = np.log10(np.maximum(y_full, self.epsilon))
-        elif self.pred_transform == 'logit':
-            print(f"Applying logit transform to predictions with bounds {self.pred_bounds}...")
-            a, b = self.pred_bounds
-            if a >= b:
-                raise ValueError(f"Invalid pred_bounds: {self.pred_bounds}. Must be [min, max].")
-            
-            # --- Optimization: Bounds Check ---
-            if np.min(y_full) < a or np.max(y_full) > b:
-                n_bad = np.sum((y_full < a) | (y_full > b))
-                print(f"Warning: {n_bad} prior predictions are outside bounds [{a}, {b}]. They will be clipped.")
-
-            y_scaled_01 = (y_full - a) / (b - a)
-            y_full = logit(np.clip(y_scaled_01, self.epsilon, 1 - self.epsilon))
-        elif self.pred_transform == 'none':
-            print("Skipping prediction transform...")
-        else:
-            raise ValueError(f"Invalid pred_transform: '{self.pred_transform}'. Choose 'log', 'logit', or 'none'.")
-
-        # --- 2. Scaling ---
+        # 2. Scaling (Z-Score)
         print("Scaling data...")
         self.obs_scaler_ = StandardScaler().fit(X_full)
         self.pred_scaler_ = StandardScaler().fit(y_full)
         X_full_scaled = self.obs_scaler_.transform(X_full)
         y_full_scaled = self.pred_scaler_.transform(y_full)
         
-        # --- 3. PCA ---
+        # 3. PCA
         print("Applying PCA...")
         if self.obs_pca_variance < 1.0:
             self.pca_obs_ = PCA(n_components=self.obs_pca_variance).fit(X_full_scaled)
@@ -117,7 +126,7 @@ class DSISurrogate:
             self.pca_obs_ = None
             X_full_pca = X_full_scaled
             n_pcs_obs = X_full.shape[1]
-            print("Input PCA: Skipped (variance threshold >= 1.0).")
+            print("Input PCA: Skipped.")
             
         if self.pred_pca_variance < 1.0:
             self.pca_pred_ = PCA(n_components=self.pred_pca_variance).fit(y_full_scaled)
@@ -128,14 +137,14 @@ class DSISurrogate:
             self.pca_pred_ = None
             y_full_pca = y_full_scaled
             n_pcs_pred = y_full.shape[1]
-            print("Output PCA: Skipped (variance threshold >= 1.0).")
+            print("Output PCA: Skipped.")
 
-        # --- 4. Build Surrogate Components (SVD on Joint Covariance) ---
+        # 4. SVD on Joint Covariance
         combined_final = np.hstack((X_full_pca, y_full_pca))
         print("Building surrogate components (Covariance + SVD)...")
         
         if np.isnan(combined_final).any() or np.isinf(combined_final).any():
-            raise ValueError("Input to surrogate contains NaN or Inf values after pre-processing.")
+            raise ValueError("Input contains NaN/Inf after pre-processing.")
             
         mean_combined = np.mean(combined_final, axis=0)
         mean_o_final = mean_combined[:n_pcs_obs]
@@ -146,7 +155,7 @@ class DSISurrogate:
         try:
             U, s_vals, Vt = np.linalg.svd(joint_cov_reg)
         except np.linalg.LinAlgError as e:
-            raise RuntimeError(f"SVD failed even after regularization: {e}")
+            raise RuntimeError(f"SVD failed: {e}")
             
         cumulative_variance = np.cumsum(s_vals / np.sum(s_vals))
         try:
@@ -168,10 +177,8 @@ class DSISurrogate:
             'n_components': n_components_svd
         }
         self.is_fitted_ = True
-        print("DSI Surrogate fitting complete.")
         return self
 
-    # --- Save and Load Methods ---
     def save(self, filename):
         """Saves the surrogate state to a pickle file."""
         if not self.is_fitted_:
@@ -187,610 +194,367 @@ class DSISurrogate:
         with open(filename, 'rb') as f:
             state = pickle.load(f)
         instance.__dict__.update(state)
-        status = "fitted" if instance.is_fitted_ else "NOT fitted"
-        print(f"Surrogate loaded from '{filename}' ({status}).")
         return instance
 
-    # --- Diagnostic & Bias Correction Methods ---
-    def diagnose_surrogate_bias(self, obs_prior, pred_prior, indices_to_plot=None, n_samples=None, figsize=(10, 8)):
-        """
-        Runs the surrogate on the prior observations to compare surrogate predictions 
-        against the true (physics-based) prior predictions.
-        Plots comparison in ORIGINAL SPACE.
-        """
-        if not self.is_fitted_:
-            raise RuntimeError("Surrogate model must be fitted before running diagnostics.")
-
-        print("--- Running Surrogate Bias Diagnostics ---")
-
-        if n_samples is not None and n_samples < obs_prior.shape[0]:
-            idx = np.random.choice(obs_prior.shape[0], n_samples, replace=False)
-            obs_subset = obs_prior[idx]
-            pred_subset_true = pred_prior[idx]
-        else:
-            obs_subset = obs_prior
-            pred_subset_true = pred_prior
-
-        # Transform Observations (Original -> Transformed)
-        if self.log_transform_obs:
-            h_obs_proc = np.log10(np.maximum(obs_subset, self.epsilon))
-        else:
-            h_obs_proc = obs_subset
-            
-        h_obs_scaled = self.obs_scaler_.transform(h_obs_proc)
-        
-        if self.pca_obs_:
-            h_target = self.pca_obs_.transform(h_obs_scaled)
-        else:
-            h_target = h_obs_scaled
-
-        # Invert
-        M_obs = self.surrogate_components_['M_obs']
-        M_pred = self.surrogate_components_['M_pred']
-        mean_o = self.surrogate_components_['mean_o']
-        mean_s = self.surrogate_components_['mean_s']
-        n_comp = self.surrogate_components_['n_components']
-        
-        reg_factor = 1e-6 
-        lhs = M_obs.T @ M_obs + reg_factor * np.identity(n_comp)
-        rhs = (h_target - mean_o) @ M_obs 
-        X_est_T = solve(lhs, rhs.T, assume_a='pos') 
-        X_est = X_est_T.T 
-
-        # Predict
-        pred_s_pca = mean_s + (X_est @ M_pred.T)
-        
-        if self.pca_pred_:
-            pred_s_scaled = self.pca_pred_.inverse_transform(pred_s_pca)
-        else:
-            pred_s_scaled = pred_s_pca
-            
-        pred_s_trans = self.pred_scaler_.inverse_transform(pred_s_scaled)
-        
-        # Transform Predictions Back (Transformed -> Original)
-        if self.pred_transform == 'log':
-            pred_subset_surrogate = 10**pred_s_trans
-        elif self.pred_transform == 'logit':
-            y_01 = expit(pred_s_trans)
-            a, b = self.pred_bounds
-            pred_subset_surrogate = y_01 * (b - a) + a
-        else:
-            pred_subset_surrogate = pred_s_trans
-
-        if indices_to_plot is None:
-            indices_to_plot = [0, 1, 2, 3] if pred_subset_true.shape[1] >= 4 else list(range(pred_subset_true.shape[1]))
-            
-        n_plots = len(indices_to_plot)
-        rows = int(np.ceil(n_plots / 2))
-        cols = 2 if n_plots > 1 else 1
-        
-        fig, axes = plt.subplots(rows, cols, figsize=figsize)
-        axes = np.atleast_1d(axes).flatten()
-        
-        for i, var_idx in enumerate(indices_to_plot):
-            if var_idx >= pred_subset_true.shape[1]:
-                continue
-            ax = axes[i]
-            y_true = pred_subset_true[:, var_idx]
-            y_surr = pred_subset_surrogate[:, var_idx]
-            corr = np.corrcoef(y_true, y_surr)[0, 1]
-            min_val = min(y_true.min(), y_surr.min())
-            max_val = max(y_true.max(), y_surr.max())
-            ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=1.5, alpha=0.7, label='1:1 Perfect')
-            ax.scatter(y_true, y_surr, alpha=0.6, c='blue', edgecolor='k', s=20)
-            ax.set_title(f'Variable Index {var_idx}\nCorr: {corr:.4f}')
-            ax.set_xlabel('True Value (Original Physics)')
-            ax.set_ylabel('Predicted Value (Surrogate)')
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-
-        plt.tight_layout()
-        plt.show()
-        print("Diagnostics complete.")
-
-    def apply_bias_correction(self, posterior_ensemble, obs_prior, pred_prior, method='auto', poly_order=2, auto_threshold=0.6):
-        """
-        Corrects the posterior predictions by learning the non-linear mapping 
-        between Surrogate and Physics observed in the Prior.
-        
-        CRITICAL: This function takes ORIGINAL SPACE inputs, transforms them internally 
-        to the feature space (Log/Logit), performs correction, and returns ORIGINAL SPACE outputs.
-
-        Methods:
-        - 'auto': Automatically chooses method based on correlation (r).
-                  If r > auto_threshold: Uses 'quantile' (safe for non-linearities).
-                  If r <= auto_threshold: Uses 'error_inflation' (safe for weak surrogates).
-        - 'polynomial': Fits a polynomial curve (True = f(Surrogate))
-        - 'linear': Fits a linear regression (True = a*Surrogate + b)
-        - 'quantile': Quantile Mapping (matches CDF of posterior to Prior Truth)
-                      SAFE VERSION: Clamps values to prior range to avoid extrapolation explosion.
-        - 'error_inflation': Adds random noise based on surrogate error std dev
-        """
-        if not self.is_fitted_:
-            raise RuntimeError("Surrogate model must be fitted.")
-
-        print(f"--- Applying Bias Correction ({method}) ---")
-        
-        # 1. Re-run Surrogate on Prior to establish baseline (in Transformed Space)
-        if self.log_transform_obs:
-            h_obs_proc = np.log10(np.maximum(obs_prior, self.epsilon))
-        else:
-            h_obs_proc = obs_prior
-        
-        h_obs_scaled = self.obs_scaler_.transform(h_obs_proc)
-        
-        if self.pca_obs_:
-            h_target = self.pca_obs_.transform(h_obs_scaled)
-        else:
-            h_target = h_obs_scaled
-
-        M_obs = self.surrogate_components_['M_obs']
-        M_pred = self.surrogate_components_['M_pred']
-        mean_o = self.surrogate_components_['mean_o']
-        mean_s = self.surrogate_components_['mean_s']
-        n_comp = self.surrogate_components_['n_components']
-        
-        reg_factor = 1e-6 
-        lhs = M_obs.T @ M_obs + reg_factor * np.identity(n_comp)
-        rhs = (h_target - mean_o) @ M_obs 
-        X_est_T = solve(lhs, rhs.T, assume_a='pos') 
-        X_est = X_est_T.T 
-
-        pred_s_pca = mean_s + (X_est @ M_pred.T)
-        
-        if self.pca_pred_:
-            pred_s_scaled = self.pca_pred_.inverse_transform(pred_s_pca)
-        else:
-            pred_s_scaled = pred_s_pca
-            
-        # This is the surrogate output in the FEATURE SPACE (Log/Logit/Linear)
-        prior_surr_trans = self.pred_scaler_.inverse_transform(pred_s_scaled)
-
-        # 2. Transform Inputs to Feature Space for fitting
-        
-        # Transform True Prior Predictions
-        if self.pred_transform == 'log':
-            y_true_trans = np.log10(np.maximum(pred_prior, self.epsilon))
-        elif self.pred_transform == 'logit':
-            a, b = self.pred_bounds
-            y_scaled = (pred_prior - a) / (b - a)
-            y_true_trans = logit(np.clip(y_scaled, self.epsilon, 1 - self.epsilon))
-        else:
-            y_true_trans = pred_prior
-
-        # Transform Posterior Ensemble (Input)
-        if self.pred_transform == 'log':
-            y_post_trans = np.log10(np.maximum(posterior_ensemble, self.epsilon))
-        elif self.pred_transform == 'logit':
-            a, b = self.pred_bounds
-            y_scaled = (posterior_ensemble - a) / (b - a)
-            y_post_trans = logit(np.clip(y_scaled, self.epsilon, 1 - self.epsilon))
-        else:
-            y_post_trans = posterior_ensemble
-
-        # 3. Apply Correction in Feature Space
-        corrected_post_trans = np.zeros_like(y_post_trans)
-        n_vars = y_true_trans.shape[1]
-        
-        if y_post_trans.shape[1] != n_vars:
-            raise ValueError("Posterior ensemble columns do not match prior predictions columns.")
-
-        stats = {'auto_quantile': 0, 'auto_error': 0}
-
-        for i in range(n_vars):
-            y_t = y_true_trans[:, i]       # Truth (Transformed)
-            y_s = prior_surr_trans[:, i]   # Surrogate (Transformed)
-            y_p = y_post_trans[:, i]       # Posterior (Transformed)
-            
-            current_method = method
-            
-            # --- Auto-Pilot Logic ---
-            if method == 'auto':
-                # Check Correlation
-                corr = np.corrcoef(y_t, y_s)[0, 1]
-                if corr >= auto_threshold:
-                    current_method = 'quantile'
-                    stats['auto_quantile'] += 1
-                else:
-                    current_method = 'error_inflation'
-                    stats['auto_error'] += 1
-            # ------------------------
-
-            if current_method == 'linear':
-                try:
-                    # Linear Regression (Degree 1)
-                    p = Polynomial.fit(y_s, y_t, deg=1)
-                    corrected_post_trans[:, i] = p(y_p)
-                except:
-                    corrected_post_trans[:, i] = y_p
-
-            elif current_method == 'polynomial':
-                try:
-                    # Polynomial Regression (Degree N)
-                    p = Polynomial.fit(y_s, y_t, deg=poly_order)
-                    corrected_post_trans[:, i] = p(y_p)
-                except:
-                    corrected_post_trans[:, i] = y_p
-
-            elif current_method == 'quantile':
-                # Quantile Mapping (CDF Matching)
-                sort_idx_surr = np.argsort(y_s)
-                y_s_sorted = y_s[sort_idx_surr]
-                y_t_sorted = np.sort(y_t)
-                
-                # SAFE IMPLEMENTATION: Clamp to min/max of prior to avoid explosion
-                # We use 'fill_value' to clip extrapolation to the observed prior range
-                f_quant = interp1d(y_s_sorted, y_t_sorted, kind='linear', 
-                                   bounds_error=False, 
-                                   fill_value=(y_t_sorted[0], y_t_sorted[-1]))
-                corrected_post_trans[:, i] = f_quant(y_p)
-
-            elif current_method == 'error_inflation':
-                error = y_t - y_s
-                std_error = np.std(error)
-                noise = np.random.normal(0, std_error, size=y_p.shape)
-                corrected_post_trans[:, i] = y_p + noise
-        
-        # 4. Inverse Transform back to Original Space
-        if self.pred_transform == 'log':
-            corrected_posterior = 10**corrected_post_trans
-        elif self.pred_transform == 'logit':
-            y_01 = expit(corrected_post_trans)
-            a, b = self.pred_bounds
-            corrected_posterior = y_01 * (b - a) + a
-        else:
-            corrected_posterior = corrected_post_trans
-
-        if method == 'auto':
-            print(f"Auto-Correction Summary: Quantile ({stats['auto_quantile']}) | Error Inf ({stats['auto_error']})")
-        
-        print("Bias correction complete.")
-        return corrected_posterior
-
-    # --- MAP/RML Solver Functions ---
+    # --- Solvers ---
+    
     def _solve_map_analytical(self, h_target_scaled, noise_variance, x_prior_sample=None):
         n_comp = self.surrogate_components_['n_components']
-        if x_prior_sample is None:
-            x_prior_sample = np.zeros(n_comp)
-
-        # Regularization: (x - x_prior)^T (x - x_prior)
-        lhs = self.surrogate_components_['M_obs'].T @ self.surrogate_components_['M_obs'] + \
-              noise_variance * np.identity(n_comp)
-        
-        rhs = (self.surrogate_components_['M_obs'].T @ \
-              (h_target_scaled - self.surrogate_components_['mean_o'])) + \
-              (noise_variance * x_prior_sample)
-        try:
-            x_map = solve(lhs, rhs, assume_a='pos')
-        except np.linalg.LinAlgError:
-             print("Warning: Analytical solve failed. Returning prior.")
-             x_map = x_prior_sample
+        if x_prior_sample is None: x_prior_sample = np.zeros(n_comp)
+        lhs = self.surrogate_components_['M_obs'].T @ self.surrogate_components_['M_obs'] + noise_variance * np.identity(n_comp)
+        rhs = (self.surrogate_components_['M_obs'].T @ (h_target_scaled - self.surrogate_components_['mean_o'])) + (noise_variance * x_prior_sample)
+        try: x_map = solve(lhs, rhs, assume_a='pos')
+        except np.linalg.LinAlgError: x_map = x_prior_sample
         return x_map
 
     def _solve_map_cg(self, h_target_scaled, noise_variance, x_prior_sample=None):
         n_comp = self.surrogate_components_['n_components']
-        if x_prior_sample is None:
-            x_prior_sample = np.zeros(n_comp)
-
+        if x_prior_sample is None: x_prior_sample = np.zeros(n_comp)
         inv_noise_var = 1.0 / noise_variance
         M_obs_cg = self.surrogate_components_['M_obs']
         mu_o_cg = self.surrogate_components_['mean_o']
-        
-        def objective_function(x):
-            o_pred_scaled = mu_o_cg + M_obs_cg @ x
-            prior_term = np.sum((x - x_prior_sample)**2)
-            likelihood_term = inv_noise_var * np.sum((h_target_scaled - o_pred_scaled)**2)
-            return 0.5 * (likelihood_term + prior_term)
-            
-        def objective_gradient(x):
-            o_pred_scaled = mu_o_cg + M_obs_cg @ x
-            grad = -inv_noise_var * M_obs_cg.T @ (h_target_scaled - o_pred_scaled) + (x - x_prior_sample)
-            return grad
-            
-        x0 = x_prior_sample
-        result = minimize(fun=objective_function, x0=x0, method='CG', jac=objective_gradient,
-                          options={'maxiter': 5000, 'gtol': 1e-6})
-        if not result.success: print(f"Warning: CG did not converge: {result.message}")
-        return result.x
+        def obj(x): return 0.5 * (inv_noise_var * np.sum((h_target_scaled - (mu_o_cg + M_obs_cg @ x))**2) + np.sum((x - x_prior_sample)**2))
+        def grad(x): return -inv_noise_var * M_obs_cg.T @ (h_target_scaled - (mu_o_cg + M_obs_cg @ x)) + (x - x_prior_sample)
+        return minimize(fun=obj, x0=x_prior_sample, method='CG', jac=grad, options={'maxiter': 5000}).x
 
     def _solve_map_ls(self, h_target_scaled, noise_variance, x_prior_sample=None):
         n_comp = self.surrogate_components_['n_components']
-        if x_prior_sample is None:
-            x_prior_sample = np.zeros(n_comp)
-
+        if x_prior_sample is None: x_prior_sample = np.zeros(n_comp)
         noise_std = np.sqrt(noise_variance)
         M_obs_ls = self.surrogate_components_['M_obs']
         mu_o_ls = self.surrogate_components_['mean_o']
-        
-        def residual_function(x):
-            data_residuals = (h_target_scaled - (mu_o_ls + M_obs_ls @ x)) / noise_std
-            prior_residuals = x - x_prior_sample
-            return np.concatenate((data_residuals, prior_residuals))
-            
-        x0 = x_prior_sample
-        result = least_squares(fun=residual_function, x0=x0, method='lm', jac='2-point')
-        if not result.success: print(f"Warning: least_squares did not converge: {result.message}")
-        return result.x
+        def res(x): return np.concatenate(((h_target_scaled - (mu_o_ls + M_obs_ls @ x)) / noise_std, x - x_prior_sample))
+        return least_squares(fun=res, x0=x_prior_sample, method='lm').x
 
-    # --- Ensemble Solvers ---
     def _solve_ensemble_smoother(self, h_target_final, obs_noise_var_processed, n_posterior_samples):
-        print(f"\n--- Performing Ensemble Smoother (ES) with {n_posterior_samples} members ---")
+        """
+        Solves for the posterior ensemble using a single-step Ensemble Smoother.
+        Updated to handle vector noise (diagonal covariance).
+        """
         M_obs, mean_o = self.surrogate_components_['M_obs'], self.surrogate_components_['mean_o']
-        n_components_svd = self.surrogate_components_['n_components']
         n_pcs_obs = M_obs.shape[0]
-
-        X_prior = np.random.normal(0.0, 1.0, size=(n_components_svd, n_posterior_samples))
         
-        obs_noise_std_final = np.sqrt(np.mean(obs_noise_var_processed))
+        # 1. Prior Ensemble in Latent Space
+        X_prior = np.random.normal(0.0, 1.0, size=(self.surrogate_components_['n_components'], n_posterior_samples))
+        
+        # 2. Observation Noise Setup
+        # Ensure standard deviation is a column vector for broadcasting
+        obs_noise_std_vec = np.sqrt(obs_noise_var_processed).reshape(-1, 1) 
+        
+        # 3. Perturb Observations (D_obs)
         H_true = np.tile(h_target_final.reshape(-1, 1), (1, n_posterior_samples))
-        Noise_obs = np.random.normal(0.0, obs_noise_std_final, size=(n_pcs_obs, n_posterior_samples))
-        H_noisy = H_true + Noise_obs
-        C_noise = np.identity(n_pcs_obs) * (obs_noise_std_final**2)
-
-        t_start = time.time()
+        # Generate noise: N(0, 1) * std_vec
+        noise_perturbations = np.random.normal(0.0, 1.0, size=(n_pcs_obs, n_posterior_samples)) * obs_noise_std_vec
+        H_noisy = H_true + noise_perturbations
+        
+        # 4. Noise Covariance Matrix (Diagonal)
+        C_noise = np.diag(obs_noise_var_processed)
+        
+        # 5. Predictions (D_pred)
         O_pred = (M_obs @ X_prior) + mean_o.reshape(-1, 1)
-        t_end = time.time()
-        print(f"  Surrogate run ({n_posterior_samples} realizations): {t_end - t_start:.4f} sec")
-
+        
+        # 6. Kalman Gain Calculation
         X_prime = X_prior - X_prior.mean(axis=1, keepdims=True)
         O_prime = O_pred - O_pred.mean(axis=1, keepdims=True)
         
         C_oo = (O_prime @ O_prime.T) / (n_posterior_samples - 1)
         C_xo = (X_prime @ O_prime.T) / (n_posterior_samples - 1)
-
-        matrix_to_invert = C_oo + C_noise
-        try:
-            K_T = solve(matrix_to_invert, C_xo.T, assume_a='pos')
-            kalman_gain = K_T.T
-        except np.linalg.LinAlgError:
-            print("Warning: ES covariance matrix singular. Using pseudo-inverse.")
-            kalman_gain = C_xo @ np.linalg.pinv(matrix_to_invert)
         
-        X_posterior = X_prior + kalman_gain @ (H_noisy - O_pred)
-        return X_posterior.T
+        # Inversion with fallback
+        matrix_to_invert = C_oo + C_noise
+        try: 
+            K_T = solve(matrix_to_invert, C_xo.T, assume_a='pos')
+        except np.linalg.LinAlgError: 
+            K_T = np.linalg.pinv(matrix_to_invert) @ C_xo.T
+            
+        # 7. Update
+        return (X_prior + K_T.T @ (H_noisy - O_pred)).T
 
     def _solve_ies(self, h_target_final, obs_noise_var_processed, n_posterior_samples, n_ies_iterations):
         """
-        Solves the Iterative Ensemble Smoother using Multiple Data Assimilation (ES-MDA).
+        Iterative Ensemble Smoother (ES-MDA).
+        Updated to handle vector noise (diagonal covariance).
         """
         print(f"\n--- Performing ES-MDA with {n_posterior_samples} members ---")
-        
         M_obs, mean_o = self.surrogate_components_['M_obs'], self.surrogate_components_['mean_o']
-        n_components_svd = self.surrogate_components_['n_components']
         n_pcs_obs = M_obs.shape[0]
-
-        X_k = np.random.normal(0.0, 1.0, size=(n_components_svd, n_posterior_samples))
         
-        # --- MDA WEIGHTING FACTOR (Alpha) ---
-        alpha = n_ies_iterations 
+        # Initial Ensemble
+        X_k = np.random.normal(0.0, 1.0, size=(self.surrogate_components_['n_components'], n_posterior_samples))
         
-        obs_noise_std_final = np.sqrt(np.mean(obs_noise_var_processed))
-        C_noise_inflated = np.identity(n_pcs_obs) * (obs_noise_std_final**2) * alpha
+        # Inflation Factor
+        alpha = n_ies_iterations
+        
+        # Noise Setup (Vectorized)
+        obs_noise_std_vec = np.sqrt(obs_noise_var_processed).reshape(-1, 1)
+        
+        # Inflated Covariance Matrix (Diagonal)
+        C_noise_inflated = np.diag(obs_noise_var_processed) * alpha
+        
         H_true = np.tile(h_target_final.reshape(-1, 1), (1, n_posterior_samples))
-
-        prev_phi_mean = None
-        cumulative_runs = 0
-        ies_start_time = time.time()
         
-        print(f"{'Iter':<5} {'Mean Phi':<15} {'Std Phi':<15} {'% Reduction':<15} {'Cumul Time (s)':<15} {'Cumul Runs':<15}")
-        print("-" * 85)
-
-        for i_iter in range(n_ies_iterations):
+        print(f"{'Iter':<5} {'Mean Phi':<15} {'Cumul Time':<15}")
+        start = time.time()
+        
+        for i in range(n_ies_iterations):
+            # 1. Forward run (Surrogate Prediction)
             O_k = (M_obs @ X_k) + mean_o.reshape(-1, 1)
             
-            cumulative_runs += n_posterior_samples
-            current_elapsed = time.time() - ies_start_time
+            # 2. Objective Function (Phi)
+            # Calculate residuals weighted by specific feature noise
+            res = (H_true - O_k) / obs_noise_std_vec
+            phi = np.mean(np.sum(res**2, axis=0))
+            print(f"{i+1:<5} {phi:<15.4f} {time.time()-start:<15.4f}")
             
-            residuals = (H_true - O_k) / obs_noise_std_final
-            phi_ensemble = np.sum(residuals**2, axis=0)
+            # 3. Perturb Observations with Inflated Noise
+            # Perturbation scale: std * sqrt(alpha)
+            noise_perturbations = np.random.normal(0.0, 1.0, size=(n_pcs_obs, n_posterior_samples)) * obs_noise_std_vec * np.sqrt(alpha)
+            H_noisy = H_true + noise_perturbations
             
-            phi_mean = np.mean(phi_ensemble)
-            phi_std = np.std(phi_ensemble)
+            # 4. Update Step
+            X_prime = X_k - X_k.mean(axis=1, keepdims=True)
+            O_prime = O_k - O_k.mean(axis=1, keepdims=True)
             
-            if prev_phi_mean is None:
-                red_str = "  -"
-            else:
-                reduction = (prev_phi_mean - phi_mean) / prev_phi_mean * 100
-                red_str = f"{reduction:.2f}%"
-
-            print(f"{i_iter + 1:<5} {phi_mean:<15.4f} {phi_std:<15.4f} {red_str:<15} {current_elapsed:<15.4f} {cumulative_runs:<15}")
+            C_oo = (O_prime @ O_prime.T) / (n_posterior_samples - 1)
+            C_xo = (X_prime @ O_prime.T) / (n_posterior_samples - 1)
             
-            prev_phi_mean = phi_mean
-
-            # Resample noise every iteration (ES-MDA Requirement)
-            Noise_obs = np.random.normal(0.0, obs_noise_std_final * np.sqrt(alpha), 
-                                         size=(n_pcs_obs, n_posterior_samples))
-            H_noisy = H_true + Noise_obs
-
-            X_k_prime = X_k - X_k.mean(axis=1, keepdims=True)
-            O_k_prime = O_k - O_k.mean(axis=1, keepdims=True)
+            matrix_to_invert = C_oo + C_noise_inflated
             
-            C_oo_k = (O_k_prime @ O_k_prime.T) / (n_posterior_samples - 1)
-            C_xo_k = (X_k_prime @ O_k_prime.T) / (n_posterior_samples - 1)
+            try: 
+                K_T = solve(matrix_to_invert, C_xo.T, assume_a='pos')
+            except np.linalg.LinAlgError: 
+                K_T = np.linalg.pinv(matrix_to_invert) @ C_xo.T
             
-            matrix_to_invert = C_oo_k + C_noise_inflated
+            X_k = X_k + K_T.T @ (H_noisy - O_k)
             
-            try:
-                K_T = solve(matrix_to_invert, C_xo_k.T, assume_a='pos')
-                kalman_gain_k = K_T.T
-            except np.linalg.LinAlgError:
-                kalman_gain_k = C_xo_k @ np.linalg.pinv(matrix_to_invert)
-
-            X_k = X_k + kalman_gain_k @ (H_noisy - O_k)
-        
         return X_k.T
 
-    def _calculate_calibration_metrics(self, x_posterior_mean, h_observed_orig,
-                                     avg_noise_variance_final, h_target_final):
+    # --- Metrics & Predict ---
+    
+    def _calculate_calibration_metrics(self, x_mean, h_obs, var, h_target):
         metrics = {'chi2_red': np.nan, 'mean_rel_error_perc': np.nan}
-        n_observations_final = len(h_target_final)
-        o_predicted_final = self.surrogate_components_['mean_o'] + \
-                            self.surrogate_components_['M_obs'] @ x_posterior_mean
-        if avg_noise_variance_final > 0:
-            residuals = h_target_final - o_predicted_final
-            total_chi2 = np.sum(residuals**2 / avg_noise_variance_final)
-            metrics['chi2_red'] = total_chi2 / n_observations_final
+        o_pred = self.surrogate_components_['mean_o'] + self.surrogate_components_['M_obs'] @ x_mean
         
-        if self.pca_obs_:
-             o_pred_scaled = self.pca_obs_.inverse_transform(o_predicted_final.reshape(1,-1))
-        else:
-             o_pred_scaled = o_predicted_final.reshape(1,-1)
-        o_pred_transformed = self.obs_scaler_.inverse_transform(o_pred_scaled)
-
-        if self.log_transform_obs:
-            o_pred_orig = 10**o_pred_transformed
-        else:
-            o_pred_orig = o_pred_transformed
-
-        abs_h_observed = np.abs(h_observed_orig.flatten())
-        safe_denominator = np.where(abs_h_observed < self.epsilon, 1.0, abs_h_observed)
-        rel_error = np.abs(o_pred_orig.flatten() - h_observed_orig.flatten()) / safe_denominator
-        metrics['mean_rel_error_perc'] = np.mean(rel_error) * 100
+        # Use inverse transform method
+        o_scaled = self.pca_obs_.inverse_transform(o_pred.reshape(1,-1)) if self.pca_obs_ else o_pred.reshape(1,-1)
+        o_trans = self.obs_scaler_.inverse_transform(o_scaled)
+        o_orig = self._transform_data(o_trans, kind='obs', direction='inverse')
+        
+        safe_den = np.where(np.abs(h_obs.flatten()) < 1e-10, 1.0, np.abs(h_obs.flatten()))
+        metrics['mean_rel_error_perc'] = np.mean(np.abs(o_orig.flatten() - h_obs.flatten()) / safe_den) * 100
         return metrics
 
-    def predict(self, h_observed, obs_noise_std,
-                inversion_type='rml', solver='analytical',
-                n_posterior_samples=500, n_ies_iterations=3, 
-                gd_learning_rate=1e-7, return_ensemble=False):
-        if not self.is_fitted_:
-            raise RuntimeError("Surrogate model has not been fitted. Call .fit() first.")
+    def _estimate_transformed_noise(self, h_obs_orig, obs_noise_std_phys, n_samples=1000):
+        """
+        Estimates noise variance in the transformed (feature) space by propagating
+        physical noise through the transformation pipeline via Monte Carlo.
+        """
+        n_obs = h_obs_orig.shape[1]
+        
+        # 1. Generate noisy samples in PHYSICAL space
+        noise_gen = np.random.normal(0.0, obs_noise_std_phys, size=(n_samples, n_obs))
+        h_monte_carlo = h_obs_orig + noise_gen
+        
+        # 2. Transform these samples to FEATURE space
+        h_mc_trans = self._transform_data(h_monte_carlo, kind='obs', direction='forward')
+        
+        # 3. Calculate variance in the transformed space
+        noise_var_trans = np.var(h_mc_trans, axis=0).reshape(1, -1)
+        return noise_var_trans
 
-        h_obs_single_orig = h_observed.copy().reshape(1, -1)
-        obs_noise_std_orig = obs_noise_std.copy().reshape(1, -1)
-
-        if self.log_transform_obs:
-            h_obs_processed = np.log10(np.maximum(h_obs_single_orig, self.epsilon))
-            obs_noise_std_processed = obs_noise_std_orig / (np.maximum(h_obs_single_orig, self.epsilon) * np.log(10))
-            obs_noise_var_processed = obs_noise_std_processed**2
+    def predict(self, h_observed, obs_noise_std, inversion_type='ies', solver='analytical', 
+                n_posterior_samples=500, n_ies_iterations=3, gd_learning_rate=1e-7, return_ensemble=False):
+        
+        if not self.is_fitted_: raise RuntimeError("Fit first.")
+        h_obs_orig = h_observed.copy().reshape(1, -1)
+        
+        # --- 1. Robust Noise Propagation ---
+        if self.obs_transform in ['normal_score', 'logit']:
+            print("Estimating transformed noise via Monte Carlo propagation...")
+            noise_proc = self._estimate_transformed_noise(h_obs_orig, obs_noise_std)
+            h_proc = self._transform_data(h_obs_orig, kind='obs', direction='forward')
+        
+        elif self.obs_transform == 'log':
+            h_proc = np.log10(np.maximum(h_obs_orig, self.epsilon))
+            noise_proc = (obs_noise_std.copy().reshape(1, -1) / (np.maximum(h_obs_orig, self.epsilon) * np.log(10)))**2
+        
         else:
-            h_obs_processed = h_obs_single_orig
-            obs_noise_std_processed = obs_noise_std_orig
-            obs_noise_var_processed = obs_noise_std_processed**2
+            h_proc = h_obs_orig
+            noise_proc = obs_noise_std.copy().reshape(1, -1)**2 
 
-        h_obs_scaled = self.obs_scaler_.transform(h_obs_processed)
-
+        # Scale Data and Noise
+        h_scaled = self.obs_scaler_.transform(h_proc)
+        noise_scaled = noise_proc / self.obs_scaler_.var_
+        
+        # PCA Projection
         if self.pca_obs_:
-             h_target_final = self.pca_obs_.transform(h_obs_scaled).flatten()
-             avg_noise_variance_final = np.mean(obs_noise_var_processed)
+            h_target = self.pca_obs_.transform(h_scaled).flatten()
+            # Approximation: Average noise variance if using scalar solvers, or use full vector for ES
+            avg_noise = np.mean(noise_scaled)
+            noise_final = np.ones(self.pca_obs_.n_components_) * avg_noise
         else:
-             h_target_final = h_obs_scaled.flatten()
-             avg_noise_variance_final = np.mean(obs_noise_var_processed)
+            h_target = h_scaled.flatten()
+            avg_noise = np.mean(noise_scaled)
+            noise_final = noise_scaled.flatten()
 
-        solver_map = {
-            'analytical': self._solve_map_analytical,
-            'cg': self._solve_map_cg,
-            'ls': self._solve_map_ls
-        }
-        if solver not in solver_map:
-            raise ValueError(f"Invalid solver type '{solver}'. Choose 'analytical', 'cg', or 'ls'.")
-        solve_map_func = solver_map[solver]
+        # --- 2. Invert ---
+        scalar_noise_var = np.mean(noise_final)
 
-        x_posterior = None
         if inversion_type == 'map':
-            print(f"\n--- Performing Single MAP Estimation using '{solver}' solver ---")
-            x_posterior = solve_map_func(h_target_final, avg_noise_variance_final, None).reshape(1, -1)
-            n_posterior_samples = 1
-
-        elif inversion_type == 'rml':
-            print(f"\n--- Performing RML ({n_posterior_samples} samples) using '{solver}' solver ---")
+            x_post = self._solve_map_analytical(h_target, scalar_noise_var).reshape(1, -1)
             
-            if self.log_transform_obs:
-                noise_gen = np.random.normal(0.0, obs_noise_std_processed, size=(n_posterior_samples, h_obs_single_orig.shape[1]))
-                noisy_h_processed = h_obs_processed + noise_gen
+        elif inversion_type == 'rml':
+            print(f"--- RML ({n_posterior_samples}) ---")
+            noise_std_scaled = np.sqrt(noise_scaled)
+            
+            # Generate perturbations in Feature space, then Scale -> PCA
+            noise_gen_feat = np.random.normal(0.0, np.sqrt(noise_proc), size=(n_posterior_samples, h_obs_orig.shape[1]))
+            noisy_h_proc = h_proc + noise_gen_feat
+            noisy_h_scaled = self.obs_scaler_.transform(noisy_h_proc)
+            
+            if self.pca_obs_:
+                noisy_targets = self.pca_obs_.transform(noisy_h_scaled)
             else:
-                 noise_gen = np.random.normal(0.0, obs_noise_std_processed, size=(n_posterior_samples, h_obs_single_orig.shape[1]))
-                 noisy_h_processed = h_obs_processed + noise_gen
-
-            noisy_h_scaled = self.obs_scaler_.transform(noisy_h_processed)
-            if self.pca_obs_: noisy_h_targets = self.pca_obs_.transform(noisy_h_scaled)
-            else: noisy_h_targets = noisy_h_scaled
-
+                noisy_targets = noisy_h_scaled
+                
             n_comp = self.surrogate_components_['n_components']
-            x_prior_samples = np.random.normal(0.0, 1.0, size=(n_posterior_samples, n_comp))
-
-            try:
-                try:
-                    client = get_client()
-                    user_managed_client = True
-                except ValueError:
-                    client = Client(LocalCluster())
-                    user_managed_client = False
-                
-                print(f"Dask dashboard at: {client.dashboard_link}")
-                
-                map_solver_delayed = delayed(solve_map_func)
-                delayed_x_maps = [map_solver_delayed(noisy_h_targets[k, :], 
-                                                     avg_noise_variance_final, 
-                                                     x_prior_samples[k, :])
-                                  for k in range(n_posterior_samples)]
-                print(f"Executing {n_posterior_samples} MAP solves in parallel...")
-                x_posterior_list = dask.compute(*delayed_x_maps)
-                
-                if not user_managed_client:
-                    client.close()
-                    
-                x_posterior = np.array(x_posterior_list)
-                
-            except Exception as e:
-                print(f"Dask parallel execution failed: {e}. Falling back to serial.")
-                x_posterior_list = []
-                for k in range(n_posterior_samples):
-                     if (k+1)%100 == 0: print(f"  Processing RML sample {k+1}/{n_posterior_samples} (serial)...")
-                     x_posterior_list.append(solve_map_func(noisy_h_targets[k, :], 
-                                                            avg_noise_variance_final,
-                                                            x_prior_samples[k, :]))
-                x_posterior = np.array(x_posterior_list)
-            print(f"RML complete. Shape of posterior x samples: {x_posterior.shape}")
-
+            x_priors = np.random.normal(0.0, 1.0, size=(n_posterior_samples, n_comp))
+            x_post_list = []
+            solver_func = self._solve_map_analytical if solver == 'analytical' else (self._solve_map_cg if solver == 'cg' else self._solve_map_ls)
+            
+            for k in range(n_posterior_samples):
+                x_post_list.append(solver_func(noisy_targets[k], scalar_noise_var, x_priors[k]))
+            x_post = np.array(x_post_list)
+            
         elif inversion_type == 'es':
-            x_posterior = self._solve_ensemble_smoother(h_target_final, obs_noise_var_processed, n_posterior_samples)
-            print(f"ES complete. Shape of posterior x samples: {x_posterior.shape}")
-        
+            x_post = self._solve_ensemble_smoother(h_target, noise_final, n_posterior_samples)
+            
         elif inversion_type == 'ies':
-            x_posterior = self._solve_ies(h_target_final, obs_noise_var_processed, n_posterior_samples, n_ies_iterations)
-            print(f"IES complete. Shape of posterior x samples: {x_posterior.shape}")
-
-        else:
-            raise ValueError("Invalid inversion_type. Choose 'map', 'rml', 'es', or 'ies'.")
-
-        if x_posterior is None or x_posterior.shape[0] == 0:
-             raise RuntimeError("Posterior parameter estimation failed.")
-
-        x_posterior_mean = np.mean(x_posterior, axis=0)
-        calibration_metrics = self._calculate_calibration_metrics(
-            x_posterior_mean, h_obs_single_orig, avg_noise_variance_final, h_target_final
-        )
-        print("\n--- Calibration Performance ---")
-        print(f"  Reduced Chi-squared (Chi²/N_obs_final): {calibration_metrics['chi2_red']:.4f}")
-        print(f"  Mean Abs Rel Error (Original Space): {calibration_metrics['mean_rel_error_perc']:.2f}%")
-
-        print("\n--- Generating Posterior Predictions ---")
-        posterior_s_pca_scaled = self.surrogate_components_['mean_s'] + \
-                                 (self.surrogate_components_['M_pred'] @ x_posterior.T).T
-        if self.pca_pred_:
-            posterior_s_scaled = self.pca_pred_.inverse_transform(posterior_s_pca_scaled)
-        else:
-            posterior_s_scaled = posterior_s_pca_scaled
+            x_post = self._solve_ies(h_target, noise_final, n_posterior_samples, n_ies_iterations)
         
-        posterior_s_transformed = self.pred_scaler_.inverse_transform(posterior_s_scaled)
+        # --- 3. Predict & Inverse Transform ---
+        metrics = self._calculate_calibration_metrics(np.mean(x_post, axis=0), h_obs_orig, scalar_noise_var, h_target)
+        print(f"Calibration Error: {metrics['mean_rel_error_perc']:.2f}%")
+        
+        pred_pca = self.surrogate_components_['mean_s'] + (self.surrogate_components_['M_pred'] @ x_post.T).T
+        pred_scaled = self.pca_pred_.inverse_transform(pred_pca) if self.pca_pred_ else pred_pca
+        pred_trans = self.pred_scaler_.inverse_transform(pred_scaled)
+        
+        pred_final = self._transform_data(pred_trans, kind='pred', direction='inverse')
+        
+        mean, std = np.mean(pred_final, axis=0), np.std(pred_final, axis=0)
+        return (mean, std, metrics, pred_final) if return_ensemble else (mean, std, metrics)
 
-        if self.pred_transform == 'log':
-            posterior_s_original = 10**posterior_s_transformed
-        elif self.pred_transform == 'logit':
-            y_pred_01 = expit(posterior_s_transformed)
-            a, b = self.pred_bounds
-            posterior_s_original = y_pred_01 * (b - a) + a
+    # --- Bias Correction & Plotting ---
+    
+    def diagnose_surrogate_bias(self, obs_prior, pred_prior, indices_to_plot=None, n_samples=None, figsize=(10, 8)):
+        if not self.is_fitted_: raise RuntimeError("Fit first.")
+        
+        if n_samples and n_samples < len(obs_prior):
+            idx = np.random.choice(len(obs_prior), n_samples, replace=False)
+            obs_subset, pred_subset = obs_prior[idx], pred_prior[idx]
         else:
-            posterior_s_original = posterior_s_transformed
+            obs_subset, pred_subset = obs_prior, pred_prior
 
-        final_mean = np.mean(posterior_s_original, axis=0)
-        if n_posterior_samples > 1 or x_posterior.shape[0] > 1:
-            final_std = np.std(posterior_s_original, axis=0)
-        else:
-            final_std = None
-        print("Prediction complete.")
+        # Invert on Prior
+        h_proc = self._transform_data(obs_subset, kind='obs', direction='forward')
+        h_scaled = self.obs_scaler_.transform(h_proc)
+        h_target = self.pca_obs_.transform(h_scaled) if self.pca_obs_ else h_scaled
+        
+        M_obs = self.surrogate_components_['M_obs']
+        M_pred = self.surrogate_components_['M_pred']
+        mean_o = self.surrogate_components_['mean_o']
+        mean_s = self.surrogate_components_['mean_s']
+        reg = 1e-6
+        lhs = M_obs.T @ M_obs + reg * np.identity(M_obs.shape[1])
+        rhs = (h_target - mean_o) @ M_obs
+        X_est = (solve(lhs, rhs.T, assume_a='pos')).T
+        
+        pred_pca = mean_s + (X_est @ M_pred.T)
+        pred_scaled = self.pca_pred_.inverse_transform(pred_pca) if self.pca_pred_ else pred_pca
+        pred_trans = self.pred_scaler_.inverse_transform(pred_scaled)
+        pred_surr = self._transform_data(pred_trans, kind='pred', direction='inverse')
+        
+        # Plot
+        if indices_to_plot is None: indices_to_plot = [0]
+        n_plots = len(indices_to_plot)
+        fig, axes = plt.subplots(int(np.ceil(n_plots/2)), 2, figsize=figsize)
+        axes = np.atleast_1d(axes).flatten()
+        
+        for i, idx in enumerate(indices_to_plot):
+            if idx >= pred_subset.shape[1]: continue
+            ax = axes[i]
+            y_true, y_surr = pred_subset[:, idx], pred_surr[:, idx]
+            ax.scatter(y_true, y_surr, alpha=0.5)
+            mn, mx = min(y_true.min(), y_surr.min()), max(y_true.max(), y_surr.max())
+            
+            # UPDATED: Solid line instead of dashed, as requested
+            ax.plot([mn, mx], [mn, mx], color='black', linestyle='-', linewidth=1.5)
+            
+            ax.set_xlabel("True Physics"); ax.set_ylabel("Surrogate")
+            ax.set_title(f"Variable {idx} (Corr: {np.corrcoef(y_true, y_surr)[0,1]:.2f})")
+        plt.tight_layout(); plt.show()
 
-        if return_ensemble:
-            return final_mean, final_std, calibration_metrics, posterior_s_original
-        else:
-            return final_mean, final_std, calibration_metrics
+    def apply_bias_correction(self, posterior_ensemble, obs_prior, pred_prior, method='auto', poly_order=2, auto_threshold=0.6, seed=None):
+        if not self.is_fitted_: raise RuntimeError("Fit first.")
+        print(f"--- Bias Correction ({method}) ---")
+        if seed is not None: np.random.seed(seed)
+        
+        # 1. Re-run on Prior
+        h_proc = self._transform_data(obs_prior, kind='obs', direction='forward')
+        h_scaled = self.obs_scaler_.transform(h_proc)
+        h_target = self.pca_obs_.transform(h_scaled) if self.pca_obs_ else h_scaled
+        
+        M_obs = self.surrogate_components_['M_obs']
+        M_pred = self.surrogate_components_['M_pred']
+        mean_o = self.surrogate_components_['mean_o']
+        mean_s = self.surrogate_components_['mean_s']
+        reg = 1e-6
+        lhs = M_obs.T @ M_obs + reg * np.identity(M_obs.shape[1])
+        rhs = (h_target - mean_o) @ M_obs
+        X_est = (solve(lhs, rhs.T, assume_a='pos')).T
+        
+        pred_pca = mean_s + (X_est @ M_pred.T)
+        pred_scaled = self.pca_pred_.inverse_transform(pred_pca) if self.pca_pred_ else pred_pca
+        pred_trans = self.pred_scaler_.inverse_transform(pred_scaled)
+        
+        # Surrogate Prior in FEATURE SPACE (Transformed)
+        prior_surr_trans = pred_trans 
+
+        # 2. Transform Truth & Posterior to Feature Space
+        y_true_trans = self._transform_data(pred_prior, kind='pred', direction='forward')
+        y_post_trans = self._transform_data(posterior_ensemble, kind='pred', direction='forward')
+        
+        corrected_post_trans = np.zeros_like(y_post_trans)
+        n_vars = y_true_trans.shape[1]
+        
+        for i in range(n_vars):
+            y_t = y_true_trans[:, i]
+            y_s = prior_surr_trans[:, i]
+            y_p = y_post_trans[:, i]
+            
+            curr_method = method
+            if method == 'auto':
+                curr_method = 'quantile' if np.corrcoef(y_t, y_s)[0,1] >= auto_threshold else 'error_inflation'
+            
+            if curr_method == 'quantile':
+                # Safe Quantile Mapping with Clamping
+                sort_idx = np.argsort(y_s)
+                f_quant = interp1d(y_s[sort_idx], np.sort(y_t), kind='linear', bounds_error=False, fill_value=(y_t.min(), y_t.max()))
+                corrected_post_trans[:, i] = f_quant(y_p)
+            elif curr_method == 'polynomial':
+                try:
+                    p = Polynomial.fit(y_s, y_t, deg=poly_order)
+                    corrected_post_trans[:, i] = p(y_p)
+                except: corrected_post_trans[:, i] = y_p
+            elif curr_method == 'linear':
+                try:
+                    p = Polynomial.fit(y_s, y_t, deg=1)
+                    corrected_post_trans[:, i] = p(y_p)
+                except: corrected_post_trans[:, i] = y_p
+            elif curr_method == 'error_inflation':
+                err_std = np.std(y_t - y_s)
+                corrected_post_trans[:, i] = y_p + np.random.normal(0, err_std, size=y_p.shape)
+        
+        # 3. Inverse Transform back to Original Space
+        return self._transform_data(corrected_post_trans, kind='pred', direction='inverse')
