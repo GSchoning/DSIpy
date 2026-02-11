@@ -6,7 +6,7 @@
 
 It provides a framework for quantifying uncertainty in complex physical systems (hydrogeology, geophysics, reservoir engineering) by learning a direct statistical relationship between observations and predictions, bypassing the need for high-dimensional parameter inversion.
 
-## 🚀 Key Features
+## Key Features
 
 * **Surrogate Modeling:** Uses SVD-based dimension reduction and covariance analysis to link prior observations to predictions.
 
@@ -24,7 +24,7 @@ It provides a framework for quantifying uncertainty in complex physical systems 
 
 * **Model Persistence:** Save and load trained surrogate models to/from disk (Pickle format).
 
-## 📦 Installation
+## Installation
 
 ### Prerequisites
 
@@ -49,7 +49,7 @@ Then, in your Python script (ensure the file is named `DSIpy.py`):
 from DSIpy import DSISurrogate
 ```
 
-## ⚡ Quick Start
+## Quick Start
 
 ### 1. Standard Uncertainty Quantification (RML)
 
@@ -149,7 +149,7 @@ posterior_refined = dsi.apply_bias_correction(
 
 <img width="560" height="437" alt="biascorrection" src="https://github.com/user-attachments/assets/092f0caf-3610-49bf-8a9e-18cd03c8845a" />
 
-## 📖 Documentation
+## Documentation
 
 ### `DSISurrogate` Class Arguments
 
@@ -182,7 +182,7 @@ dsi.save('my_surrogate.pkl')
 dsi_loaded = DSISurrogate.load('my_surrogate.pkl')
 ```
 
-## 📚 Theoretical Background
+## Theoretical Background
 
 ### The BEL Philosophy
 
@@ -232,7 +232,7 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 
 * **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)**, DSI can handle mild non-linearities in the data-prediction relationship.
 
-## 🔬 References
+## References
 
 If you use DSIpy in your research, please consider citing the following foundational works on which this module is built:
 
@@ -254,7 +254,7 @@ If you use DSIpy in your research, please consider citing the following foundati
 * **Randomized Maximum Likelihood (RML):**
   Oliver, D. S., He, N., & Reynolds, A. C. (1996). Conditioning permeability fields to pressure data. *ECMOR V*, 1-11. [https://doi.org/10.3997/2214-4609.201406894](https://doi.org/10.3997/2214-4609.201406894)
 
-## 🌟 Acknowledgements
+## Acknowledgements
 
 This work is inspired by the pioneering contributions of **John Doherty** (Watermark Numerical Computing) to the field of groundwater uncertainty quantification. As the author of the **PEST** suite, his philosophy on embracing non-uniqueness and his specific guidance on handling structural error in surrogate models were the direct inspiration for the **Posterior Refinement** workflows implemented in this module.
 
