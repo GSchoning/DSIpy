@@ -26,7 +26,7 @@ dsi = DSISurrogate(
     obs_pca_variance=1,   # Keep 99% of Head variance
     pred_pca_variance=1,
     svd_variance=0.9999999999,# Keep 100% of Prediction variance
-    log_transform_obs=False, # Heads are linear, not log-normal
+    obs_transform='none', # Heads are linear, not log-normal
     pred_transform='none'
 )
 
