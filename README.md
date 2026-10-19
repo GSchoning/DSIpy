@@ -14,13 +14,13 @@ It provides a framework for quantifying uncertainty in complex physical systems 
   * **MAP:** Maximum A Posteriori estimation (Analytical & Conjugate Gradient solvers).
   * **RML:** Randomized Maximum Likelihood for robust uncertainty quantification.
   * **ES:** Ensemble Smoother for rapid, linear-Gaussian updates.
-  * **IES / ES-MDA:** Iterative Ensemble Smoother with Multiple Data Assimilation for robustly handling non-linearities.
+  * **IES / ES-MDA:** Iterative Ensemble Smoother with Multiple Data Assimilation. The surrogate is linear in its latent variables, so ES-MDA, ES, MAP and RML condition the same linear-Gaussian posterior; non-linearity is handled by the transforms and the posterior refinement below.
 
 * **Posterior Refinement:** Post-processing tools to diagnose structural surrogate error and refine posterior predictions using **auto-pilot**, **quantile mapping**, **polynomial/linear regression**, or **error inflation**.
 
 * **Parallel Computing:** Integrated **Dask** support for parallelizing RML inversions across cores.
 
-* **Data Transformations:** Built-in handling for Log10 (orders of magnitude) and Logit (bounded variables like saturation) transforms.
+* **Data Transformations:** Built-in handling for Log10 (orders of magnitude), Logit (bounded variables like saturation) and Normal Score transforms.
 
 * **Model Persistence:** Save and load trained surrogate models to/from disk (Pickle format).
 
@@ -71,7 +71,7 @@ field_data = np.load('field_data.npy')
 dsi = DSISurrogate(
     obs_pca_variance=0.95,   # Keep 95% energy of inputs
     pred_pca_variance=0.99,  # Keep 99% energy of outputs
-    log_transform_obs=True,  # Log10 transform input
+    obs_transform='log',     # Log10 transform input
     pred_transform='log'     # Log10 transform output
 )
 
@@ -97,7 +97,7 @@ Use the `logit` transform and `pred_bounds` to ensure predictions respect physic
 
 ```python
 dsi_sat = DSISurrogate(
-    log_transform_obs=True,
+    obs_transform='log',
     pred_transform='logit',
     pred_bounds=[0.0, 1.0] 
 )
@@ -157,9 +157,14 @@ posterior_refined = dsi.apply_bias_correction(
 | :--- | :--- | :--- | :--- | 
 | `obs_pca_variance` | `float` | `1.0` | Variance to keep in input PCA (<1.0) or skip PCA (>=1.0). | 
 | `pred_pca_variance` | `float` | `1.0` | Variance to keep in output PCA. | 
-| `log_transform_obs` | `bool` | `True` | Apply Log10 to observations before processing. | 
-| `pred_transform` | `str` | `'log'` | `'log'`, `'logit'`, or `'none'`. | 
+| `svd_variance` | `float` | `0.9999` | Variance of the joint covariance kept by the surrogate SVD. | 
+| `obs_transform` | `str` | `'log'` | `'log'`, `'normal_score'`, or `'none'`. | 
+| `pred_transform` | `str` | `'log'` | `'log'`, `'logit'`, `'normal_score'`, or `'none'`. | 
 | `pred_bounds` | `list` | `None` | `[min, max]` bounds. Required if using `'logit'`. | 
+| `epsilon` | `float` | `1e-10` | Floor of the log transform: values below it are clipped to it (with a warning). Set it below the smallest value of your data. | 
+| `regularization` | `float` | `1e-9` | Added to the diagonal of the joint covariance before the SVD. | 
+
+**Data of small magnitude** (e.g. electromagnetic responses of ~1e-12): with `obs_transform='log'`, set `epsilon` below the smallest value (e.g. `epsilon=1e-30`), otherwise every value under the default floor of 1e-10 becomes the same number. `'normal_score'` works at any magnitude. Observations that are constant across the prior carry no information and are reported at `fit`.
 
 ### `predict()` Method Arguments
 
@@ -230,7 +235,7 @@ When we observe real field data ($d_{obs}$), we solve for the optimal latent vec
 
 * **Uncertainty:** DSI naturally preserves the geologic variability of the prior. It doesn't collapse the solution to a single "best fit," but provides a posterior probability distribution (P10, P50, P90).
 
-* **Non-Linearity:** By using methods like the **Iterative Ensemble Smoother (ES-MDA)**, DSI can handle mild non-linearities in the data-prediction relationship.
+* **Non-Linearity:** The surrogate is linear in transformed space. Log, logit and normal-score transforms absorb non-linearity in each variable, and the **posterior refinement** tools correct what the linear surrogate gets wrong. Iterating (ES-MDA) does not change the answer against a linear surrogate.
 
 ## References
 

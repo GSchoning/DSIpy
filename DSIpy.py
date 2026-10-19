@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler, QuantileTransformer
+from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from scipy.linalg import solve
 from scipy.optimize import minimize, least_squares
 from scipy.special import logit, expit
+from scipy.stats import norm
 from scipy.interpolate import interp1d
 from numpy.polynomial import Polynomial
 import warnings
@@ -14,6 +15,44 @@ import time
 
 # Suppress OptimizeWarning from scipy during CG convergence issues
 warnings.filterwarnings('ignore', category=RuntimeWarning, module='scipy.optimize')
+
+class NormalScoreTransformer:
+    """
+    Column-wise normal score transform from the empirical quantiles of the prior.
+    Same method as sklearn's QuantileTransformer(output_distribution='normal'), but
+    without its absolute tolerance of 1e-7 on the input values: that tolerance maps
+    every value of a column whose range is below ~1e-7 (e.g. AEM dB/dt) to the same
+    score. Values outside the prior range are clipped to the extreme scores (+-5.2).
+    """
+    def __init__(self, n_quantiles=1000, clip=1e-7):
+        self.n_quantiles = n_quantiles
+        self.clip = clip
+
+    def fit(self, X):
+        X = np.asarray(X, dtype=float)
+        self.references_ = np.linspace(0, 1, min(self.n_quantiles, X.shape[0]))
+        self.quantiles_ = np.quantile(X, self.references_, axis=0)
+        return self
+
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
+
+    def transform(self, X):
+        X = np.asarray(X, dtype=float)
+        r, out = self.references_, np.empty_like(X)
+        for j in range(X.shape[1]):
+            q = self.quantiles_[:, j]
+            # Average of the forward and backward interpolation: repeated quantile values (ties) map to their middle
+            u = 0.5 * (np.interp(X[:, j], q, r) - np.interp(-X[:, j], -q[::-1], -r[::-1]))
+            out[:, j] = norm.ppf(np.clip(u, self.clip, 1 - self.clip))
+        return out
+
+    def inverse_transform(self, Z):
+        Z = np.asarray(Z, dtype=float)
+        out = np.empty_like(Z)
+        for j in range(Z.shape[1]):
+            out[:, j] = np.interp(norm.cdf(Z[:, j]), self.references_, self.quantiles_[:, j])
+        return out
 
 class DSISurrogate:
     """
@@ -61,16 +100,17 @@ class DSISurrogate:
                 # Lazy initialization of NST transformer
                 if kind == 'obs':
                     if self.obs_nst_ is None:
-                        self.obs_nst_ = QuantileTransformer(output_distribution='normal', n_quantiles=min(len(data), 1000))
+                        self.obs_nst_ = NormalScoreTransformer(n_quantiles=min(len(data), 1000))
                         return self.obs_nst_.fit_transform(data)
                     return self.obs_nst_.transform(data)
                 else:
                     if self.pred_nst_ is None:
-                        self.pred_nst_ = QuantileTransformer(output_distribution='normal', n_quantiles=min(len(data), 1000))
+                        self.pred_nst_ = NormalScoreTransformer(n_quantiles=min(len(data), 1000))
                         return self.pred_nst_.fit_transform(data)
                     return self.pred_nst_.transform(data)
-            
+
             elif method == 'log':
+                self._check_log_floor(data, kind)
                 return np.log10(np.maximum(data, self.epsilon))
             
             elif method == 'logit':
@@ -97,6 +137,28 @@ class DSISurrogate:
             else:
                 return data
 
+    def _check_log_floor(self, data, kind):
+        """
+        Warns (once per surrogate and kind) when the log transform clips values at epsilon:
+        positive values below epsilon (data on a small scale, e.g. AEM dB/dt ~1e-12) or
+        zero / negative values. Either way they all become log10(epsilon).
+        """
+        warned = self.__dict__.setdefault('_log_floor_warned', set())
+        if kind in warned:
+            return
+        data = np.asarray(data, dtype=float)
+        small = (data > 0) & (data < self.epsilon)
+        nonpos = data <= 0
+        if small.any() or nonpos.any():
+            warned.add(kind)
+            msg = f"log transform of {kind}: "
+            if small.any():
+                msg += (f"{small.sum()} positive values are below epsilon={self.epsilon:g} (smallest {data[small].min():.3g}) "
+                        f"and are clipped to it; set epsilon below the smallest value, e.g. epsilon={data[small].min() / 10:.0e}. ")
+            if nonpos.any():
+                msg += f"{nonpos.sum()} zero or negative values are clipped to epsilon={self.epsilon:g}."
+            warnings.warn(msg, stacklevel=3)
+
     def fit(self, obs_prior, pred_prior):
         """Builds the DSI surrogate model from the prior ensemble."""
         print("--- Fitting DSI Surrogate Model ---")
@@ -112,6 +174,10 @@ class DSISurrogate:
         print("Scaling data...")
         self.obs_scaler_ = StandardScaler().fit(X_full)
         self.pred_scaler_ = StandardScaler().fit(y_full)
+        n_const = int(np.sum(self.obs_scaler_.var_ == 0))
+        if n_const:
+            warnings.warn(f"{n_const} observation column(s) are constant across the prior (after the {self.obs_transform} "
+                          "transform) and carry no information.", stacklevel=2)
         X_full_scaled = self.obs_scaler_.transform(X_full)
         y_full_scaled = self.pred_scaler_.transform(y_full)
         
@@ -375,16 +441,17 @@ class DSISurrogate:
             h_proc = self._transform_data(h_obs_orig, kind='obs', direction='forward')
         
         elif self.obs_transform == 'log':
+            self._check_log_floor(h_obs_orig, 'obs')
             h_proc = np.log10(np.maximum(h_obs_orig, self.epsilon))
             noise_proc = (obs_noise_std.copy().reshape(1, -1) / (np.maximum(h_obs_orig, self.epsilon) * np.log(10)))**2
-        
+
         else:
             h_proc = h_obs_orig
-            noise_proc = obs_noise_std.copy().reshape(1, -1)**2 
+            noise_proc = obs_noise_std.copy().reshape(1, -1)**2
 
-        # Scale Data and Noise
+        # Scale Data and Noise (scale_ is what transform() divides by: 1, not 0, for a constant column)
         h_scaled = self.obs_scaler_.transform(h_proc)
-        noise_scaled = noise_proc / self.obs_scaler_.var_
+        noise_scaled = noise_proc / self.obs_scaler_.scale_**2
         
         # PCA Projection
         if self.pca_obs_:
