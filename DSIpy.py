@@ -198,11 +198,23 @@ class DSISurrogate:
 
     # --- Solvers ---
     
+    @staticmethod
+    def _noise_matrix(noise_variance, n):
+        """Noise covariance as an (n, n) matrix from a scalar, a vector (diagonal) or a matrix."""
+        nv = np.asarray(noise_variance, dtype=float)
+        if nv.ndim == 0:
+            return nv * np.identity(n)
+        if nv.ndim == 1:
+            return np.diag(nv)
+        return nv
+
     def _solve_map_analytical(self, h_target_scaled, noise_variance, x_prior_sample=None):
         n_comp = self.surrogate_components_['n_components']
         if x_prior_sample is None: x_prior_sample = np.zeros(n_comp)
-        lhs = self.surrogate_components_['M_obs'].T @ self.surrogate_components_['M_obs'] + noise_variance * np.identity(n_comp)
-        rhs = (self.surrogate_components_['M_obs'].T @ (h_target_scaled - self.surrogate_components_['mean_o'])) + (noise_variance * x_prior_sample)
+        M = self.surrogate_components_['M_obs']
+        Rinv_M = solve(self._noise_matrix(noise_variance, M.shape[0]), M, assume_a='pos')     # R^-1 M
+        lhs = M.T @ Rinv_M + np.identity(n_comp)
+        rhs = Rinv_M.T @ (h_target_scaled - self.surrogate_components_['mean_o']) + x_prior_sample
         try: x_map = solve(lhs, rhs, assume_a='pos')
         except np.linalg.LinAlgError: x_map = x_prior_sample
         return x_map
@@ -210,20 +222,22 @@ class DSISurrogate:
     def _solve_map_cg(self, h_target_scaled, noise_variance, x_prior_sample=None):
         n_comp = self.surrogate_components_['n_components']
         if x_prior_sample is None: x_prior_sample = np.zeros(n_comp)
-        inv_noise_var = 1.0 / noise_variance
         M_obs_cg = self.surrogate_components_['M_obs']
         mu_o_cg = self.surrogate_components_['mean_o']
-        def obj(x): return 0.5 * (inv_noise_var * np.sum((h_target_scaled - (mu_o_cg + M_obs_cg @ x))**2) + np.sum((x - x_prior_sample)**2))
-        def grad(x): return -inv_noise_var * M_obs_cg.T @ (h_target_scaled - (mu_o_cg + M_obs_cg @ x)) + (x - x_prior_sample)
+        Rinv = np.linalg.inv(self._noise_matrix(noise_variance, M_obs_cg.shape[0]))
+        def obj(x):
+            r = h_target_scaled - (mu_o_cg + M_obs_cg @ x)
+            return 0.5 * (r @ Rinv @ r + np.sum((x - x_prior_sample)**2))
+        def grad(x): return -M_obs_cg.T @ (Rinv @ (h_target_scaled - (mu_o_cg + M_obs_cg @ x))) + (x - x_prior_sample)
         return minimize(fun=obj, x0=x_prior_sample, method='CG', jac=grad, options={'maxiter': 5000}).x
 
     def _solve_map_ls(self, h_target_scaled, noise_variance, x_prior_sample=None):
         n_comp = self.surrogate_components_['n_components']
         if x_prior_sample is None: x_prior_sample = np.zeros(n_comp)
-        noise_std = np.sqrt(noise_variance)
         M_obs_ls = self.surrogate_components_['M_obs']
         mu_o_ls = self.surrogate_components_['mean_o']
-        def res(x): return np.concatenate(((h_target_scaled - (mu_o_ls + M_obs_ls @ x)) / noise_std, x - x_prior_sample))
+        Lw = np.linalg.cholesky(np.linalg.inv(self._noise_matrix(noise_variance, M_obs_ls.shape[0]))).T   # Lw^T Lw = R^-1
+        def res(x): return np.concatenate((Lw @ (h_target_scaled - (mu_o_ls + M_obs_ls @ x)), x - x_prior_sample))
         return least_squares(fun=res, x0=x_prior_sample, method='lm').x
 
     def _solve_ensemble_smoother(self, h_target_final, obs_noise_var_processed, n_posterior_samples):
@@ -238,17 +252,13 @@ class DSISurrogate:
         X_prior = np.random.normal(0.0, 1.0, size=(self.surrogate_components_['n_components'], n_posterior_samples))
         
         # 2. Observation Noise Setup
-        # Ensure standard deviation is a column vector for broadcasting
-        obs_noise_std_vec = np.sqrt(obs_noise_var_processed).reshape(-1, 1) 
+        # Noise covariance (full matrix: diagonal without PCA, P R P^T with input PCA)
+        C_noise = self._noise_matrix(obs_noise_var_processed, n_pcs_obs)
         
         # 3. Perturb Observations (D_obs)
         H_true = np.tile(h_target_final.reshape(-1, 1), (1, n_posterior_samples))
-        # Generate noise: N(0, 1) * std_vec
-        noise_perturbations = np.random.normal(0.0, 1.0, size=(n_pcs_obs, n_posterior_samples)) * obs_noise_std_vec
+        noise_perturbations = np.linalg.cholesky(C_noise) @ np.random.normal(0.0, 1.0, size=(n_pcs_obs, n_posterior_samples))
         H_noisy = H_true + noise_perturbations
-        
-        # 4. Noise Covariance Matrix (Diagonal)
-        C_noise = np.diag(obs_noise_var_processed)
         
         # 5. Predictions (D_pred)
         O_pred = (M_obs @ X_prior) + mean_o.reshape(-1, 1)
@@ -286,10 +296,12 @@ class DSISurrogate:
         alpha = n_ies_iterations
         
         # Noise Setup (Vectorized)
-        obs_noise_std_vec = np.sqrt(obs_noise_var_processed).reshape(-1, 1)
+        C_noise = self._noise_matrix(obs_noise_var_processed, n_pcs_obs)
+        L_noise = np.linalg.cholesky(C_noise)
+        obs_noise_std_vec = np.sqrt(np.diag(C_noise)).reshape(-1, 1)
         
-        # Inflated Covariance Matrix (Diagonal)
-        C_noise_inflated = np.diag(obs_noise_var_processed) * alpha
+        # Inflated Covariance Matrix
+        C_noise_inflated = C_noise * alpha
         
         H_true = np.tile(h_target_final.reshape(-1, 1), (1, n_posterior_samples))
         
@@ -308,7 +320,7 @@ class DSISurrogate:
             
             # 3. Perturb Observations with Inflated Noise
             # Perturbation scale: std * sqrt(alpha)
-            noise_perturbations = np.random.normal(0.0, 1.0, size=(n_pcs_obs, n_posterior_samples)) * obs_noise_std_vec * np.sqrt(alpha)
+            noise_perturbations = (L_noise @ np.random.normal(0.0, 1.0, size=(n_pcs_obs, n_posterior_samples))) * np.sqrt(alpha)
             H_noisy = H_true + noise_perturbations
             
             # 4. Update Step
@@ -389,19 +401,17 @@ class DSISurrogate:
         # PCA Projection
         if self.pca_obs_:
             h_target = self.pca_obs_.transform(h_scaled).flatten()
-            # Approximation: Average noise variance if using scalar solvers, or use full vector for ES
-            avg_noise = np.mean(noise_scaled)
-            noise_final = np.ones(self.pca_obs_.n_components_) * avg_noise
+            P = self.pca_obs_.components_                        # PCA is linear: noise covariance P R P^T
+            noise_final = (P * noise_scaled.flatten()) @ P.T
         else:
             h_target = h_scaled.flatten()
-            avg_noise = np.mean(noise_scaled)
             noise_final = noise_scaled.flatten()
 
         # --- 2. Invert ---
-        scalar_noise_var = np.mean(noise_final)
+        noise_cov = noise_final
 
         if inversion_type == 'map':
-            x_post = self._solve_map_analytical(h_target, scalar_noise_var).reshape(1, -1)
+            x_post = self._solve_map_analytical(h_target, noise_cov).reshape(1, -1)
             
         elif inversion_type == 'rml':
             print(f"--- RML ({n_posterior_samples}) ---")
@@ -423,7 +433,7 @@ class DSISurrogate:
             solver_func = self._solve_map_analytical if solver == 'analytical' else (self._solve_map_cg if solver == 'cg' else self._solve_map_ls)
             
             for k in range(n_posterior_samples):
-                x_post_list.append(solver_func(noisy_targets[k], scalar_noise_var, x_priors[k]))
+                x_post_list.append(solver_func(noisy_targets[k], noise_cov, x_priors[k]))
             x_post = np.array(x_post_list)
             
         elif inversion_type == 'es':
@@ -433,7 +443,7 @@ class DSISurrogate:
             x_post = self._solve_ies(h_target, noise_final, n_posterior_samples, n_ies_iterations)
         
         # --- 3. Predict & Inverse Transform ---
-        metrics = self._calculate_calibration_metrics(np.mean(x_post, axis=0), h_obs_orig, scalar_noise_var, h_target)
+        metrics = self._calculate_calibration_metrics(np.mean(x_post, axis=0), h_obs_orig, noise_cov, h_target)
         print(f"Calibration Error: {metrics['mean_rel_error_perc']:.2f}%")
         
         pred_pca = self.surrogate_components_['mean_s'] + (self.surrogate_components_['M_pred'] @ x_post.T).T
