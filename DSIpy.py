@@ -101,6 +101,10 @@ class DSISurrogate:
         """Builds the DSI surrogate model from the prior ensemble."""
         print("--- Fitting DSI Surrogate Model ---")
         
+        # Normal-score transformers are fitted on first use; reset them so a refit learns the new data
+        self.obs_nst_ = None
+        self.pred_nst_ = None
+        
         # 1. Transform Data (Log / Logit / Normal Score)
         print(f"Transforming Observations ({self.obs_transform})...")
         X_full = self._transform_data(obs_prior, kind='obs', direction='forward')

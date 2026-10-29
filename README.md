@@ -71,7 +71,7 @@ field_data = np.load('field_data.npy')
 dsi = DSISurrogate(
     obs_pca_variance=0.95,   # Keep 95% energy of inputs
     pred_pca_variance=0.99,  # Keep 99% energy of outputs
-    log_transform_obs=True,  # Log10 transform input
+    obs_transform='log',     # Log10 transform input
     pred_transform='log'     # Log10 transform output
 )
 
@@ -97,7 +97,7 @@ Use the `logit` transform and `pred_bounds` to ensure predictions respect physic
 
 ```python
 dsi_sat = DSISurrogate(
-    log_transform_obs=True,
+    obs_transform='log',
     pred_transform='logit',
     pred_bounds=[0.0, 1.0] 
 )
@@ -157,8 +157,8 @@ posterior_refined = dsi.apply_bias_correction(
 | :--- | :--- | :--- | :--- | 
 | `obs_pca_variance` | `float` | `1.0` | Variance to keep in input PCA (<1.0) or skip PCA (>=1.0). | 
 | `pred_pca_variance` | `float` | `1.0` | Variance to keep in output PCA. | 
-| `log_transform_obs` | `bool` | `True` | Apply Log10 to observations before processing. | 
-| `pred_transform` | `str` | `'log'` | `'log'`, `'logit'`, or `'none'`. | 
+| `obs_transform` | `str` | `'log'` | `'log'`, `'normal_score'` or `'none'`, applied to observations before processing. | 
+| `pred_transform` | `str` | `'log'` | `'log'`, `'logit'`, `'normal_score'` or `'none'`. | 
 | `pred_bounds` | `list` | `None` | `[min, max]` bounds. Required if using `'logit'`. | 
 
 ### `predict()` Method Arguments

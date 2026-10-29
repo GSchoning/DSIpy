@@ -1,4 +1,4 @@
-"""Noise handling in DSISurrogate.predict: MAP, RML, ES and ES-MDA against exact Gaussian conditioning.
+"""Tests for DSISurrogate: noise handling against exact Gaussian conditioning, normal-score refits, the example.
 
 The reference throughout is exact linear-Gaussian conditioning on the ensemble's own sample mean and covariance
 (PEST manual part II, eq. 18.1.4-18.1.5, with the noise covariance R added to C_dd):
@@ -123,3 +123,22 @@ def test_posterior_samples_unequal_obs_variances(method):
                                    n_ies_iterations=4)
     assert np.all(np.abs(m - m_ref) < 4 * s_ref / np.sqrt(4000) + 1e-3), (m, m_ref)
     np.testing.assert_allclose(s, s_ref, rtol=0.08)
+
+
+def test_normal_score_refit_uses_new_data():
+    """Fitting the same instance again rebuilds the normal-score transformers from the new data."""
+    rng = np.random.default_rng(0)
+    s = DSISurrogate(obs_transform="normal_score", pred_transform="normal_score")
+    D1, H1 = rng.lognormal(size=(300, 4)), rng.lognormal(size=(300, 1))
+    s.fit(D1, H1)
+    D2, H2 = D1 * 100.0, H1 * 100.0
+    s.fit(D2, H2)
+    assert abs(np.median(s._transform_data(D2, "obs"))) < 0.2
+    assert abs(np.median(s._transform_data(H2, "pred"))) < 0.2
+
+
+def test_example_uses_current_constructor():
+    ex = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples", "unconfined aquifer",
+                      "run_inversion.py")
+    src = open(ex).read()
+    assert "log_transform_obs" not in src and "obs_transform=" in src
